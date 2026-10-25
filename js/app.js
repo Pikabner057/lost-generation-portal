@@ -34,6 +34,20 @@ function fail(error, fallback) {
 function fmtDate(iso) {
   return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
 }
+function fmtDateTime(iso) {
+  return new Date(iso).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
+}
+async function signedUrls(bucket, paths) {
+  const list = paths.filter(Boolean);
+  if (!list.length) return {};
+  const { data } = await sb.storage.from(bucket).createSignedUrls(list, 3600);
+  return Object.fromEntries((data || []).filter(d => d.signedUrl).map(d => [d.path, d.signedUrl]));
+}
+function avatarHtml(p, url, lg = false) {
+  const initials = (p?.display_name || "?").trim().slice(0, 2).toUpperCase();
+  return url ? `<span class="avatar${lg ? " avatar-lg" : ""}"><img src="${esc(url)}" alt="${esc(p.display_name)}"></span>`
+             : `<span class="avatar is-empty${lg ? " avatar-lg" : ""}" aria-hidden="true">${esc(initials)}</span>`;
+}
 function passwordProblem(pw) {
   if (pw.length < 10) return "Use at least 10 characters.";
   if (!/[a-zA-Z]/.test(pw) || !/\d/.test(pw)) return "Use letters and numbers.";
@@ -194,7 +208,8 @@ async function viewRoles() {
     if (!r.claimable && !c) body = `<span class="badge badge-reserved">Reserved</span><p class="muted">Abner decides this one.</p>`;
     else if (c) body = `<p class="slot-holder">${esc(who[c.user_id])} ${typeChip(c.poke_type)}</p>
         <span class="badge badge-${c.status}">${c.status === "approved" ? "Taken" : "Pending"}</span>
-        ${c.user_id === state.user.id && c.status === "pending" ? `<button class="btn btn-ghost btn-small" data-drop="${c.id}">Drop claim</button>` : ""}`;
+        ${c.user_id === state.user.id && c.status === "pending" ? `<button class="btn btn-ghost btn-small" data-drop="${c.id}">Drop claim</button>` : ""}
+        ${state.profile.is_admin ? `<div class="slot-action"><button class="btn btn-ghost btn-small" data-view="${c.user_id}">View submission</button></div>` : ""}`;
     else if (mine) body = `<span class="badge badge-open">Open</span>`;
     else body = `<span class="badge badge-open">Open</span>
         <div class="row">
@@ -223,12 +238,148 @@ async function viewRoles() {
     toast("Claimed! Waiting for Abner’s approval.");
     viewRoles();
   });
+  app.querySelectorAll("[data-view]").forEach(b => b.onclick = () => openSubmission(b.dataset.view, who[b.dataset.view]));
   app.querySelectorAll("[data-drop]").forEach(b => b.onclick = async () => {
     if (!confirm("Drop your claim?")) return;
     const { error } = await sb.from("claims").delete().eq("id", b.dataset.drop);
     if (error) return fail(error);
     toast("Claim dropped."); viewRoles();
   });
+}
+
+// ---------- admin: a friend's submission + dated history (opened from Roles) ----------
+function characterDetails(s, imgUrl) {
+  const d = s.dialogue || {};
+  return `
+    ${imgUrl ? `<div class="look-preview"><img src="${esc(imgUrl)}" alt="Look reference"></div>` : ""}
+    <p><b>Name:</b> ${esc(s.title || "")} ${esc(s.character_name || "—")}</p>
+    <p><b>Look:</b> ${esc(s.look_note || "—")}</p>
+    <p><b>Team:</b> ${(s.team || []).map(m => esc(m.species + (m.nickname ? ` “${m.nickname}”` : "") + (m.note ? ` (${m.note})` : ""))).join(", ") || "—"}</p>
+    <p><b>Before battle:</b> ${esc(d.intro || "—")}</p>
+    <p><b>When they lose:</b> ${esc(d.defeat || "—")}</p>
+    <p><b>Extra:</b> ${esc((d.extra || []).join(" / ") || "—")}</p>
+    <p><b>Notes:</b> ${esc(s.notes || "—")}</p>`;
+}
+async function openSubmission(userId, name) {
+  const sheet = document.getElementById("sheet");
+  sheet.innerHTML = `<p class="loading">Loading…</p>`;
+  if (!sheet.open) sheet.showModal();
+  const [{ data: history, error }, { data: prof }] = await Promise.all([
+    sb.from("character_history").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
+    sb.from("profiles").select("approved_history_id,approved_at").eq("id", userId).single(),
+  ]);
+  if (error) { sheet.close(); return fail(error); }
+  const urls = await signedUrls("looks", (history || []).map(h => h.snapshot.look_image));
+  sheet.innerHTML = `
+    <div class="panel-head"><h2 class="card-title">${esc(name)}’s submission</h2>
+      <button class="btn btn-ghost btn-small panel-close" type="button" id="sheet-close">Close</button></div>
+    ${!history?.length ? `<p class="muted">${esc(name)} hasn’t filled in a character yet.</p>` : `
+    <ol class="history">
+      ${history.map((h, i) => {
+        const approved = prof?.approved_history_id === h.id;
+        return `<li class="history-item${i === 0 ? " is-latest" : ""}${approved ? " is-approved" : ""}">
+          <details ${i === 0 ? "open" : ""}>
+            <summary><span class="history-date">${esc(fmtDateTime(h.created_at))}</span>
+              ${i === 0 ? `<span class="badge badge-open">Latest</span>` : ""}
+              ${approved ? `<span class="approved-mark">Approved ${esc(fmtDate(prof.approved_at))}</span>` : ""}</summary>
+            ${characterDetails(h.snapshot, urls[h.snapshot.look_image])}
+            ${approved ? "" : `<button class="btn btn-primary btn-small" data-approve="${h.id}">Approve this version</button>`}
+          </details></li>`;
+      }).join("")}
+    </ol>`}`;
+  document.getElementById("sheet-close").onclick = () => sheet.close();
+  sheet.querySelectorAll("[data-approve]").forEach(b => b.onclick = async () => {
+    b.disabled = true;
+    const { error: e } = await sb.rpc("approve_character", { p_history_id: Number(b.dataset.approve) });
+    if (e) { b.disabled = false; return fail(e); }
+    toast(`${name}’s name and title are approved.`);
+    openSubmission(userId, name);
+  });
+}
+document.getElementById("sheet").addEventListener("click", e => { if (e.target.id === "sheet") e.target.close(); });
+
+// ---------- crew profiles ----------
+async function viewProfiles() {
+  const [{ data: profiles }, { data: claims }, { data: roles }] = await Promise.all([
+    sb.from("profiles").select("id,display_name,avatar_path,approved_title,approved_character_name").order("display_name"),
+    sb.from("claims").select("user_id,role_id,poke_type,status").neq("status", "rejected"),
+    sb.from("roles").select("id,label"),
+  ]);
+  const roleLabel = Object.fromEntries((roles || []).map(r => [r.id, r.label]));
+  const claimOf = Object.fromEntries((claims || []).map(c => [c.user_id, c]));
+  const urls = await signedUrls("avatars", (profiles || []).map(p => p.avatar_path));
+  app.innerHTML = `
+    <h1 class="page-title">The Crew</h1>
+    <div class="profile-grid">
+      ${(profiles || []).map(p => {
+        const c = claimOf[p.id];
+        return `<a class="profile-card card" href="#/profile/${p.id}">
+          ${avatarHtml(p, urls[p.avatar_path])}
+          <p class="profile-name">${esc(p.display_name)}</p>
+          ${p.approved_title ? `<p class="profile-title">${esc(p.approved_title)}</p>` : ""}
+          ${p.approved_character_name ? `<p class="profile-character">${esc(p.approved_character_name)}</p>` : ""}
+          ${c ? `<p class="muted">${esc(roleLabel[c.role_id])} ${typeChip(c.poke_type)}</p>` : `<p class="muted">No role yet</p>`}
+        </a>`;
+      }).join("")}
+    </div>`;
+}
+
+async function viewProfile(id) {
+  const isMe = id === state.user.id;
+  const [{ data: p, error }, { data: claim }, { data: roles }] = await Promise.all([
+    sb.from("profiles").select("id,display_name,avatar_path,approved_title,approved_character_name,approved_at").eq("id", id).single(),
+    sb.from("claims").select("role_id,poke_type,status").eq("user_id", id).neq("status", "rejected").maybeSingle(),
+    sb.from("roles").select("id,label"),
+  ]);
+  if (error) return fail(error);
+  const roleLabel = Object.fromEntries((roles || []).map(r => [r.id, r.label]));
+  const urls = await signedUrls("avatars", [p.avatar_path]);
+  // Teams are private: only the owner and the admin can read characters (enforced by RLS)
+  let ch = null;
+  if (isMe || state.profile.is_admin) ({ data: ch } = await sb.from("characters").select("team").eq("user_id", id).maybeSingle());
+  app.innerHTML = `
+    <p><a href="#/profile" class="btn btn-ghost btn-small">← The Crew</a></p>
+    <div class="profile-card card">
+      ${avatarHtml(p, urls[p.avatar_path], true)}
+      <h1 class="profile-name page-title">${esc(p.display_name)}</h1>
+      ${p.approved_title ? `<p class="profile-title">${esc(p.approved_title)}</p>` : ""}
+      ${p.approved_character_name ? `<p class="profile-character">${esc(p.approved_character_name)}</p>` : `<p class="muted">Character not approved yet</p>`}
+      ${claim ? `<p>${esc(roleLabel[claim.role_id])} ${typeChip(claim.poke_type)} <span class="badge badge-${claim.status}">${claim.status === "approved" ? "Taken" : "Pending"}</span></p>` : `<p class="muted">No role yet</p>`}
+    </div>
+    ${isMe || state.profile.is_admin ? `
+    <div class="profile-private card stack">
+      <p class="private-note">Only ${isMe ? "you" : esc(p.display_name)} and Abner can see this</p>
+      <h2 class="card-title">Team</h2>
+      ${(ch?.team || []).length ? `<ul>${ch.team.map(m => `<li>${esc(m.species)}${m.nickname ? ` “${esc(m.nickname)}”` : ""}</li>`).join("")}</ul>` : `<p class="muted">No team yet.</p>`}
+    </div>` : ""}
+    ${isMe ? `
+    <form id="profedit" class="card stack"><h2 class="card-title">Edit my profile</h2>
+      <div class="field"><label for="pname">Username</label><input id="pname" maxlength="24" value="${esc(p.display_name)}"></div>
+      <div class="field"><label for="pavatar">Profile picture (PNG, JPG or WebP, max 2 MB)</label><input id="pavatar" type="file" accept="image/png,image/jpeg,image/webp"></div>
+      <button class="btn btn-primary" type="submit">Save profile</button>
+    </form>` : ""}`;
+
+  if (!isMe) return;
+  document.getElementById("profedit").onsubmit = async e => {
+    e.preventDefault();
+    const btn = e.submitter; btn.disabled = true;
+    const patch = { display_name: document.getElementById("pname").value.trim() || p.display_name };
+    const file = document.getElementById("pavatar").files[0];
+    if (file) {
+      const ext = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" }[file.type];
+      if (!ext || file.size > 2 * 1024 * 1024) { btn.disabled = false; return toast("Use a PNG, JPG or WebP under 2 MB.", true); }
+      const path = `${state.user.id}/avatar-${Date.now()}.${ext}`;
+      const { error: upErr } = await sb.storage.from("avatars").upload(path, file, { contentType: file.type });
+      if (upErr) { btn.disabled = false; return fail(upErr); }
+      if (p.avatar_path) await sb.storage.from("avatars").remove([p.avatar_path]);
+      patch.avatar_path = path;
+    }
+    const { error: e2 } = await sb.from("profiles").update(patch).eq("id", state.user.id);
+    btn.disabled = false;
+    if (e2) return fail(e2);
+    state.profile = { ...state.profile, ...patch };
+    toast("Profile saved."); viewProfile(id);
+  };
 }
 
 // ---------- my character ----------
@@ -239,17 +390,27 @@ async function signedLook(path) {
 }
 async function viewMe() {
   const { data: ch } = await sb.from("characters").select("*").eq("user_id", state.user.id).maybeSingle();
-  const c = ch || { character_name: "", team: [], look_note: "", look_image: null, dialogue: {}, notes: "" };
+  const c = ch || { character_name: "", title: "", team: [], look_note: "", look_image: null, dialogue: {}, notes: "" };
+  const prof = state.profile;
+  const changedSinceApproval = prof.approved_at && ch && new Date(ch.updated_at) > new Date(prof.approved_at);
+  const approvalHtml = prof.approved_at
+    ? `<p><span class="approved-mark">Approved ${esc(fmtDate(prof.approved_at))}</span> ${esc(prof.approved_title || "")} ${esc(prof.approved_character_name || "")}</p>
+       ${changedSinceApproval ? `<p class="hint">You changed things since then. Abner will review the new version.</p>` : ""}`
+    : `<p class="muted">Not approved yet. Abner reviews every version you save.</p>`;
   const team = Array.from({ length: 6 }, (_, i) => c.team[i] || { species: "", nickname: "", note: "" });
   const d = c.dialogue || {};
   const lookUrl = await signedLook(c.look_image);
   app.innerHTML = `
   <h1 class="page-title">My Character</h1>
-  <p class="muted">Only you and Abner can see this page’s answers.</p>
+  <p class="muted">Only you and Abner can see this page’s answers. Your approved name and title show on your Crew profile.</p>
   <form id="char" class="stack">
     <div class="card stack"><h2 class="card-title">Who are you in the game?</h2>
+      ${ch ? `<p class="meta-date">Last saved ${esc(fmtDateTime(ch.updated_at))}</p>` : ""}
+      ${approvalHtml}
       <div class="field"><label for="cname">Character name</label><input id="cname" maxlength="12" value="${esc(c.character_name)}">
         <p class="hint">GBA names fit 12 characters.</p></div>
+      <div class="field"><label for="ctitle">Title</label><input id="ctitle" maxlength="24" value="${esc(c.title)}" placeholder="The Iron Wall">
+        <p class="hint">Shown before your name, like a trainer class.</p></div>
     </div>
     <div class="card stack"><h2 class="card-title">Your team (up to 6)</h2>
       <datalist id="species">${SPECIES.map(s => `<option value="${esc(s)}">`).join("")}</datalist>
@@ -289,8 +450,7 @@ async function viewMe() {
       const path = `${state.user.id}/look-${Date.now()}.${ext}`;
       const { error } = await sb.storage.from("looks").upload(path, file, { contentType: file.type });
       if (error) { btn.disabled = false; return fail(error); }
-      if (c.look_image) await sb.storage.from("looks").remove([c.look_image]);
-      look_image = path;
+      look_image = path; // old images are kept so the version history still shows them
     }
     const teamOut = team.map((_, i) => ({
       species: document.getElementById("sp" + i).value.trim(),
@@ -302,6 +462,7 @@ async function viewMe() {
     const row = {
       user_id: state.user.id,
       character_name: document.getElementById("cname").value.trim(),
+      title: document.getElementById("ctitle").value.trim(),
       team: teamOut,
       look_note: document.getElementById("looknote").value.trim(),
       look_image,
@@ -373,8 +534,8 @@ async function viewAdmin() {
     sb.from("characters").select("*"),
   ]);
   const who = names(profiles);
+  const approvedOf = Object.fromEntries((profiles || []).map(p => [p.id, { title: p.approved_title, character_name: p.approved_character_name, approved_at: p.approved_at }]));
   const roleLabel = Object.fromEntries((roles || []).map(r => [r.id, r.label]));
-  const looks = await Promise.all((chars || []).map(ch => signedLook(ch.look_image)));
   app.innerHTML = `
   <h1 class="page-title">Admin</h1>
   <div class="card stack"><h2 class="card-title">Claims</h2>
@@ -395,19 +556,8 @@ async function viewAdmin() {
     <div class="field"><label for="ubody">Details</label><textarea id="ubody" rows="3"></textarea></div>
     <button class="btn btn-gold" type="submit">Post update</button>
   </form>
-  <div class="card stack"><h2 class="card-title">Characters</h2>
-    ${(chars || []).map((ch, i) => `<details class="post">
-      <summary><b>${esc(who[ch.user_id])}</b>: ${esc(ch.character_name || "(no name yet)")}</summary>
-      ${looks[i] ? `<div class="look-preview"><img src="${esc(looks[i])}" alt="Look reference from ${esc(who[ch.user_id])}"></div>` : ""}
-      <p><b>Look:</b> ${esc(ch.look_note)}</p>
-      <p><b>Team:</b> ${(ch.team || []).map(m => esc(m.species + (m.nickname ? ` “${m.nickname}”` : "") + (m.note ? ` (${m.note})` : ""))).join(", ") || "—"}</p>
-      <p><b>Intro:</b> ${esc(ch.dialogue?.intro)}</p><p><b>Defeat:</b> ${esc(ch.dialogue?.defeat)}</p>
-      <p><b>Extra:</b> ${esc((ch.dialogue?.extra || []).join(" / "))}</p>
-      <p><b>Notes:</b> ${esc(ch.notes)}</p>
-    </details>`).join("") || `<p class="muted">Nobody has filled in a character yet.</p>`}
-  </div>
   <div class="card stack"><h2 class="card-title">Export for the game</h2>
-    <p class="muted">Downloads everything as one JSON file for Spark and Codex to turn into trainer data.</p>
+    <p class="muted">Character submissions now open from each slot on the Roles page. Downloads everything as one JSON file for Spark and Codex to turn into trainer data.</p>
     <button class="btn btn-ghost" id="export">Download export</button>
   </div>
   <div class="card stack"><h2 class="card-title">Adding a friend</h2>
@@ -434,7 +584,7 @@ async function viewAdmin() {
     const out = {
       exportedAt: new Date().toISOString(),
       roles, claims: (claims || []).map(c => ({ ...c, name: who[c.user_id] })),
-      characters: (chars || []).map(ch => ({ ...ch, name: who[ch.user_id] })),
+      characters: (chars || []).map(ch => ({ ...ch, name: who[ch.user_id], approved: approvedOf[ch.user_id] })),
     };
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([JSON.stringify(out, null, 2)], { type: "application/json" }));
@@ -444,18 +594,19 @@ async function viewAdmin() {
 }
 
 // ---------- router ----------
-const ROUTES = { home: viewHome, roles: viewRoles, me: viewMe, ideas: () => viewIdeas("idea"), admin: viewAdmin };
+const ROUTES = { home: viewHome, roles: viewRoles, me: viewMe, ideas: () => viewIdeas("idea"), admin: viewAdmin,
+  profile: param => (param ? viewProfile(param) : viewProfiles()) };
 let recovering = false;
 async function route() {
   if (!state.user) return viewLogin();
   if (recovering) return viewSetPassword(false);
   if (state.profile?.must_change_password) return viewSetPassword(true);
   showShell(true);
-  const name = (location.hash.match(/^#\/(\w+)/) || [])[1] || "home";
+  const [, name = "home", param] = location.hash.match(/^#\/(\w+)(?:\/([\w-]+))?/) || [];
   const view = ROUTES[name] || viewHome;
   document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("active", a.dataset.route === name));
   app.innerHTML = `<p class="loading">Loading…</p>`;
-  try { await view(); } catch (e) { fail(e); }
+  try { await view(param); } catch (e) { fail(e); }
 }
 window.addEventListener("hashchange", route);
 
