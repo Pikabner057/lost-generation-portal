@@ -102,7 +102,11 @@ function viewLogin() {
     </form>
     <button class="btn btn-ghost btn-small" id="forgot" type="button">Forgot password? Email me a link</button>
     <p class="hint">No email after a few minutes? Message Abner and he’ll reset it.</p>
+    <hr>
+    <p class="muted">First time here? Abner added your email to the invite list.</p>
+    <button class="btn btn-gold" id="to-signup" type="button">Create my account</button>
   </div></div>`;
+  document.getElementById("to-signup").onclick = viewSignup;
   document.getElementById("login").onsubmit = async e => {
     e.preventDefault();
     const btn = e.submitter; btn.disabled = true;
@@ -119,6 +123,48 @@ function viewLogin() {
     const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname + "#/reset" });
     if (error) return fail(error);
     toast("If that account exists, a link is on its way.");
+  };
+}
+
+function viewSignup() {
+  showShell(false);
+  app.innerHTML = `
+  <div class="auth-wrap"><div class="auth-card card stack">
+    <h1 class="page-title">Join the crew</h1>
+    <p class="muted">Use the email you gave Abner. Only invited emails can sign up.</p>
+    <form id="signup" class="stack">
+      <div class="field"><label for="sname">Username (what the group sees)</label><input id="sname" maxlength="24" required autocomplete="nickname"></div>
+      <div class="field"><label for="semail">Email</label><input id="semail" type="email" autocomplete="email" required></div>
+      <div class="field"><label for="spw1">Password</label><input id="spw1" type="password" autocomplete="new-password" required>
+        <p class="hint">At least 10 characters, letters and numbers.</p></div>
+      <div class="field"><label for="spw2">Repeat it</label><input id="spw2" type="password" autocomplete="new-password" required></div>
+      <p class="error-text" id="serr"></p>
+      <button class="btn btn-primary" type="submit">Create account</button>
+    </form>
+    <button class="btn btn-ghost btn-small" id="to-login" type="button">I already have an account</button>
+  </div></div>`;
+  document.getElementById("to-login").onclick = viewLogin;
+  document.getElementById("signup").onsubmit = async e => {
+    e.preventDefault();
+    const err = document.getElementById("serr"), pw = document.getElementById("spw1").value;
+    if (pw !== document.getElementById("spw2").value) return (err.textContent = "Passwords don’t match.");
+    const problem = passwordProblem(pw); if (problem) return (err.textContent = problem);
+    err.textContent = "";
+    const btn = e.submitter; btn.disabled = true;
+    const { data, error } = await sb.auth.signUp({
+      email: document.getElementById("semail").value.trim().toLowerCase(),
+      password: pw,
+      options: { data: { display_name: document.getElementById("sname").value.trim(), self_signup: true } },
+    });
+    btn.disabled = false;
+    if (error) {
+      // The database refuses emails that aren't on the invite list ("Database error saving new user")
+      if (/database error|not_invited/i.test(error.message)) return (err.textContent = "That email isn’t on the invite list. Ask Abner to add it, then try again.");
+      if (/already registered/i.test(error.message)) return (err.textContent = "That email already has an account. Log in instead.");
+      return (err.textContent = error.message);
+    }
+    if (!data.session) return toast("Account created! Check your email to confirm, then log in.");
+    toast("Welcome to the crew!");
   };
 }
 
@@ -527,11 +573,12 @@ async function viewIdeas(kind = "idea") {
 // ---------- admin ----------
 async function viewAdmin() {
   if (!state.profile.is_admin) { location.hash = "#/home"; return; }
-  const [{ data: roles }, { data: claims }, { data: profiles }, { data: chars }] = await Promise.all([
+  const [{ data: roles }, { data: claims }, { data: profiles }, { data: chars }, { data: invites }] = await Promise.all([
     sb.from("roles").select("*").order("sort"),
     sb.from("claims").select("*").order("created_at"),
     sb.from("profiles").select("*"),
     sb.from("characters").select("*"),
+    sb.from("invites").select("*").order("added_at"),
   ]);
   const who = names(profiles);
   const approvedOf = Object.fromEntries((profiles || []).map(p => [p.id, { title: p.approved_title, character_name: p.approved_character_name, approved_at: p.approved_at }]));
@@ -560,10 +607,36 @@ async function viewAdmin() {
     <p class="muted">Character submissions now open from each slot on the Roles page. Downloads everything as one JSON file for Spark and Codex to turn into trainer data.</p>
     <button class="btn btn-ghost" id="export">Download export</button>
   </div>
-  <div class="card stack"><h2 class="card-title">Adding a friend</h2>
-    <p class="muted">Supabase → Authentication → Users → Add user → Create new user (tick Auto Confirm), with a temporary password.
-    Send it on WhatsApp; the portal makes them pick their own on first login.</p>
-  </div>`;
+  <form id="newinvite" class="card stack"><h2 class="card-title">Invited emails</h2>
+    <p class="muted">Only these emails can create an account. Add a friend’s email, then send them the portal link.</p>
+    <div class="row">
+      <div class="field"><label for="iemail">Email</label><input id="iemail" type="email" required></div>
+      <div class="field"><label for="inote">Who is it?</label><input id="inote" maxlength="40" placeholder="Carlos"></div>
+    </div>
+    <button class="btn btn-gold" type="submit">Add to invite list</button>
+    <div class="table"><table>
+      <thead><tr><th>Email</th><th>Who</th><th>Status</th><th></th></tr></thead>
+      <tbody>${(invites || []).map(i => `<tr>
+        <td>${esc(i.email)}</td><td>${esc(i.note)}</td>
+        <td>${i.used_at ? `<span class="badge badge-approved">Joined ${esc(fmtDate(i.used_at))}</span>` : `<span class="badge badge-pending">Not joined yet</span>`}</td>
+        <td class="admin-actions">${i.used_at ? "" : `<button class="btn btn-danger btn-small" type="button" data-uninvite="${esc(i.email)}">Remove</button>`}</td>
+      </tr>`).join("") || `<tr><td colspan="4" class="muted">Nobody invited yet.</td></tr>`}</tbody>
+    </table></div>
+  </form>`;
+
+  document.getElementById("newinvite").onsubmit = async e => {
+    e.preventDefault();
+    const email = document.getElementById("iemail").value.trim().toLowerCase();
+    const { error } = await sb.from("invites").insert({ email, note: document.getElementById("inote").value.trim() });
+    if (error) return /duplicate/.test(error.message) ? toast("That email is already invited.", true) : fail(error);
+    toast(`${email} can now create an account.`); viewAdmin();
+  };
+  app.querySelectorAll("[data-uninvite]").forEach(b => b.onclick = async () => {
+    if (!confirm(`Remove ${b.dataset.uninvite} from the invite list?`)) return;
+    const { error } = await sb.from("invites").delete().eq("email", b.dataset.uninvite);
+    if (error) return fail(error);
+    toast("Removed."); viewAdmin();
+  });
 
   app.querySelectorAll("[data-set]").forEach(b => b.onclick = async () => {
     const { error } = await sb.from("claims").update({ status: b.dataset.status }).eq("id", b.dataset.set);
