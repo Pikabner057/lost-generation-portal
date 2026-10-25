@@ -3,6 +3,7 @@
 // this file only decides what to show.
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm";
 import { SPECIES } from "./species.js";
+import { ITEMS } from "./items.js";
 
 const SUPABASE_URL = "https://ejworaccnktuzlevzydn.supabase.co";
 const SUPABASE_KEY = "sb_publishable_Xm5oe0vRFaizEggFh_gFEQ_a1p5TdYe"; // public by design
@@ -10,6 +11,10 @@ const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 const TYPES = ["Normal","Fire","Water","Grass","Electric","Ice","Fighting","Poison","Ground",
   "Flying","Psychic","Bug","Rock","Ghost","Dragon","Dark","Steel","Fairy"];
+const TERA_TYPES = [...TYPES, "Stellar"];
+const GIMMICKS = ["None", "Mega", "Z-Move", "Dynamax", "Tera"];
+const MAX_ROLES = 2;
+const SPECIES_SET = new Set(SPECIES), ITEMS_SET = new Set(ITEMS);
 const app = document.getElementById("app");
 const state = { user: null, profile: null };
 
@@ -201,25 +206,26 @@ function viewSetPassword(firstTime) {
   };
 }
 
-// ---------- home ----------
+// ===== HOME =====
 async function viewHome() {
   const [{ data: updates }, { data: claims }, { data: roles }] = await Promise.all([
     sb.from("updates").select("*").order("created_at", { ascending: false }),
     sb.from("claims").select("role_id,user_id,poke_type,status").neq("status", "rejected"),
-    sb.from("roles").select("id,label,claimable"),
+    sb.from("roles").select("id,label,claimable,category"),
   ]);
-  const mine = (claims || []).find(c => c.user_id === state.user.id);
+  const mine = (claims || []).filter(c => c.user_id === state.user.id);
   const roleLabel = Object.fromEntries((roles || []).map(r => [r.id, r.label]));
-  const claimable = (roles || []).filter(r => r.claimable).length;
+  const slots = (roles || []).filter(r => r.claimable && r.category !== "custom").map(r => r.id);
+  const taken = (claims || []).filter(c => slots.includes(c.role_id)).length;
   app.innerHTML = `
   <h1 class="page-title">Hey ${esc(state.profile.display_name)}!</h1>
   <div class="grid">
-    <div class="card stack"><h2 class="card-title">Your role</h2>
-      ${mine ? `<p>${esc(roleLabel[mine.role_id])} ${typeChip(mine.poke_type)} <span class="badge badge-${mine.status}">${mine.status}</span></p>`
-             : `<p class="muted">No role yet.</p><a class="btn btn-gold" href="#/roles">Pick a role</a>`}
+    <div class="card stack"><h2 class="card-title">Your role${mine.length > 1 ? "s" : ""}</h2>
+      ${mine.length ? mine.map(c => `<p>${esc(roleLabel[c.role_id])} ${typeChip(c.poke_type)} <span class="badge badge-${c.status}">${c.status}</span></p>`).join("")
+                    : `<p class="muted">No role yet.</p><a class="btn btn-gold" href="#/roles">Pick a role</a>`}
     </div>
     <div class="card stack"><h2 class="card-title">The crew</h2>
-      <p><b>${(claims || []).length}</b> of ${claimable} slots claimed.</p>
+      <p><b>${taken}</b> of ${slots.length} slots claimed.</p>
       <a class="btn btn-ghost btn-small" href="#/roles">See who’s who</a>
     </div>
   </div>
@@ -235,16 +241,19 @@ async function viewHome() {
   </div>`;
 }
 
-// ---------- roles ----------
+// ===== ROLES =====
 async function viewRoles() {
-  const [{ data: roles }, { data: claims }, { data: profiles }] = await Promise.all([
+  const [{ data: roles }, { data: claims }, { data: profiles }, { data: requests }] = await Promise.all([
     sb.from("roles").select("*").order("sort"),
     sb.from("claims").select("*").neq("status", "rejected"),
     sb.from("profiles").select("id,display_name"),
+    sb.from("role_requests").select("*").eq("user_id", state.user.id).order("created_at", { ascending: false }),
   ]);
   const who = names(profiles);
   const bySlot = Object.fromEntries((claims || []).map(c => [c.role_id, c]));
-  const mine = (claims || []).find(c => c.user_id === state.user.id);
+  const mine = (claims || []).filter(c => c.user_id === state.user.id);
+  const canClaim = mine.length < MAX_ROLES;
+  const second = mine.length === 1;
   const takenTypes = new Set((claims || []).map(c => c.poke_type).filter(Boolean));
   const freeTypes = TYPES.filter(t => !takenTypes.has(t));
 
@@ -256,30 +265,51 @@ async function viewRoles() {
         <span class="badge badge-${c.status}">${c.status === "approved" ? "Taken" : "Pending"}</span>
         ${c.user_id === state.user.id && c.status === "pending" ? `<button class="btn btn-ghost btn-small" data-drop="${c.id}">Drop claim</button>` : ""}
         ${state.profile.is_admin ? `<div class="slot-action"><button class="btn btn-ghost btn-small" data-view="${c.user_id}">View submission</button></div>` : ""}`;
-    else if (mine) body = `<span class="badge badge-open">Open</span>`;
+    else if (!canClaim) body = `<span class="badge badge-open">Open</span>`;
     else body = `<span class="badge badge-open">Open</span>
-        <div class="row">
-          ${r.needs_type ? `<select data-type-for="${r.id}" aria-label="Type for ${esc(r.label)}">
-             <option value="">Pick a type…</option>${freeTypes.map(t => `<option>${t}</option>`).join("")}</select>` : ""}
-          <button class="btn btn-gold btn-small" data-claim="${r.id}">Claim</button>
-        </div>`;
+        ${r.needs_type ? `<select data-type-for="${r.id}" aria-label="Type for ${esc(r.label)}">
+           <option value="">Pick a type…</option>${freeTypes.map(t => `<option>${t}</option>`).join("")}</select>` : ""}
+        ${second ? `<div class="reason-box field"><label for="why-${r.id}">Why a second role?</label>
+           <textarea id="why-${r.id}" data-reason-for="${r.id}" rows="2" maxlength="1000" placeholder="Your idea for playing both"></textarea></div>` : ""}
+        <button class="btn btn-gold btn-small" data-claim="${r.id}">Claim</button>`;
     const cls = ["slot", "card", c?.user_id === state.user.id ? "is-mine" : "", !r.claimable && !c ? "is-reserved" : ""].join(" ");
-    return `<div class="${cls}"><div class="slot-head"><h3 class="card-title">${esc(r.label)}</h3></div>${body}</div>`;
+    return `<div class="${cls}"><div class="slot-head"><h3 class="card-title">${esc(r.label)}</h3></div>
+      <p class="team-size-note">First battle · ${r.first_team_size} Pokémon · Rematch · 6</p>${body}</div>`;
   };
-  const group = (title, cats) => `<h2 class="page-title">${title}</h2><div class="grid">${(roles || []).filter(r => cats.includes(r.category)).map(slotHtml).join("")}</div>`;
+  const group = (title, cats) => {
+    const list = (roles || []).filter(r => cats.includes(r.category));
+    return list.length ? `<h2 class="page-title">${title}</h2><div class="grid">${list.map(slotHtml).join("")}</div>` : "";
+  };
   app.innerHTML = `
     <h1 class="page-title">Roles</h1>
-    <p class="muted">${mine ? "You’ve claimed your slot. Abner approves claims." : "Claim one slot. Gym Leaders and the Elite Four each pick a type nobody else has."}</p>
+    <p class="muted">${mine.length === 0 ? "Claim a slot. Gym Leaders and the Elite Four each pick a type nobody else has."
+      : mine.length === 1 ? "You have 1 role. You can claim a second one if you tell Abner why."
+      : "You hold the maximum of 2 roles."} Abner approves every claim.</p>
     ${group("Gym Leaders", ["gym"])}
     ${group("Elite Four & Champion", ["elite4", "champion"])}
-    ${group("Villains & Professor", ["aqua", "magma", "professor"])}`;
+    ${group("Villains & Professor", ["aqua", "magma", "professor"])}
+    ${group("Custom roles", ["custom"])}
+    <form id="rolereq" class="request-card card stack"><h2 class="card-title">Want a role that isn’t listed?</h2>
+      <p class="muted">Like a spy in Team Magma, a rival or a side character. Tell Abner the idea; if he approves, the role is created for you.</p>
+      <div class="field"><label for="rqname">Role name</label><input id="rqname" maxlength="40" required placeholder="Team Magma Spy"></div>
+      <div class="field"><label for="rqwhy">Your idea and why</label><textarea id="rqwhy" rows="3" maxlength="1000" required></textarea></div>
+      <button class="btn btn-gold" type="submit" ${canClaim ? "" : "disabled"}>Send request</button>
+      ${canClaim ? "" : `<p class="hint">You already hold 2 roles.</p>`}
+      ${(requests || []).length ? `<ul class="request-list">${requests.map(q => `<li class="request-item">
+        <b>${esc(q.role_name)}</b> <span class="badge badge-${q.status}">${q.status}</span>
+        <p class="request-reason muted">${esc(q.reason)}</p><p class="meta-date">${esc(fmtDateTime(q.created_at))}</p>
+        ${q.status === "pending" ? `<button class="btn btn-ghost btn-small" type="button" data-unrequest="${q.id}">Cancel request</button>` : ""}
+      </li>`).join("")}</ul>` : ""}
+    </form>`;
 
   app.querySelectorAll("[data-claim]").forEach(b => b.onclick = async () => {
     const roleId = b.dataset.claim;
     const sel = app.querySelector(`[data-type-for="${roleId}"]`);
+    const why = app.querySelector(`[data-reason-for="${roleId}"]`);
     if (sel && !sel.value) return toast("Pick a type first.", true);
+    if (why && why.value.trim().length < 5) return toast("Tell Abner why you want a second role.", true);
     b.disabled = true;
-    const { error } = await sb.from("claims").insert({ role_id: roleId, poke_type: sel ? sel.value : null });
+    const { error } = await sb.from("claims").insert({ role_id: roleId, poke_type: sel ? sel.value : null, reason: why ? why.value.trim() : "" });
     if (error) { b.disabled = false; return fail(error); }
     toast("Claimed! Waiting for Abner’s approval.");
     viewRoles();
@@ -291,29 +321,51 @@ async function viewRoles() {
     if (error) return fail(error);
     toast("Claim dropped."); viewRoles();
   });
+  document.getElementById("rolereq").onsubmit = async e => {
+    e.preventDefault();
+    const { error } = await sb.from("role_requests").insert({
+      role_name: document.getElementById("rqname").value.trim(),
+      reason: document.getElementById("rqwhy").value.trim(),
+    });
+    if (error) return fail(error);
+    toast("Request sent to Abner."); viewRoles();
+  };
+  app.querySelectorAll("[data-unrequest]").forEach(b => b.onclick = async () => {
+    const { error } = await sb.from("role_requests").delete().eq("id", b.dataset.unrequest);
+    if (error) return fail(error);
+    viewRoles();
+  });
 }
 
+
 // ---------- admin: a friend's submission + dated history (opened from Roles) ----------
-function characterDetails(s, imgUrl) {
-  const d = s.dialogue || {};
+function characterDetails(s, imgUrl, roleLabel = {}) {
+  const perRole = Object.entries(s.roles || {}).map(([k, r]) => {
+    const d = r.dialogue || {};
+    return `<div class="role-entry stack"><h3 class="card-title">${esc(roleLabel[k] || k)}${r.title ? `: ${esc(r.title)}` : ""}</h3>
+      <p><b>First battle:</b> ${teamSummary(r.first_team)}</p>
+      <p><b>Rematch:</b> ${teamSummary(r.rematch_team)}</p>
+      <p><b>Before battle:</b> ${esc(d.intro || "—")}</p>
+      <p><b>When they lose:</b> ${esc(d.defeat || "—")}</p>
+      <p><b>Extra:</b> ${esc((d.extra || []).join(" / ") || "—")}</p></div>`;
+  }).join("");
   return `
     ${imgUrl ? `<div class="look-preview"><img src="${esc(imgUrl)}" alt="Look reference"></div>` : ""}
-    <p><b>Name:</b> ${esc(s.title || "")} ${esc(s.character_name || "—")}</p>
+    <p><b>Character:</b> ${esc(s.character_name || "—")}</p>
     <p><b>Look:</b> ${esc(s.look_note || "—")}</p>
-    <p><b>Team:</b> ${(s.team || []).map(m => esc(m.species + (m.nickname ? ` “${m.nickname}”` : "") + (m.note ? ` (${m.note})` : ""))).join(", ") || "—"}</p>
-    <p><b>Before battle:</b> ${esc(d.intro || "—")}</p>
-    <p><b>When they lose:</b> ${esc(d.defeat || "—")}</p>
-    <p><b>Extra:</b> ${esc((d.extra || []).join(" / ") || "—")}</p>
+    ${perRole || `<p><b>Team (old format):</b> ${teamSummary(s.team)}</p>`}
     <p><b>Notes:</b> ${esc(s.notes || "—")}</p>`;
 }
 async function openSubmission(userId, name) {
   const sheet = document.getElementById("sheet");
   sheet.innerHTML = `<p class="loading">Loading…</p>`;
   if (!sheet.open) sheet.showModal();
-  const [{ data: history, error }, { data: prof }] = await Promise.all([
+  const [{ data: history, error }, { data: prof }, { data: roles }] = await Promise.all([
     sb.from("character_history").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
     sb.from("profiles").select("approved_history_id,approved_at").eq("id", userId).single(),
+    sb.from("roles").select("id,label"),
   ]);
+  const roleLabel = Object.fromEntries((roles || []).map(r => [r.id, r.label]));
   if (error) { sheet.close(); return fail(error); }
   const urls = await signedUrls("looks", (history || []).map(h => h.snapshot.look_image));
   sheet.innerHTML = `
@@ -328,7 +380,7 @@ async function openSubmission(userId, name) {
             <summary><span class="history-date">${esc(fmtDateTime(h.created_at))}</span>
               ${i === 0 ? `<span class="badge badge-open">Latest</span>` : ""}
               ${approved ? `<span class="approved-mark">Approved ${esc(fmtDate(prof.approved_at))}</span>` : ""}</summary>
-            ${characterDetails(h.snapshot, urls[h.snapshot.look_image])}
+            ${characterDetails(h.snapshot, urls[h.snapshot.look_image], roleLabel)}
             ${approved ? "" : `<button class="btn btn-primary btn-small" data-approve="${h.id}">Approve this version</button>`}
           </details></li>`;
       }).join("")}
@@ -338,7 +390,7 @@ async function openSubmission(userId, name) {
     b.disabled = true;
     const { error: e } = await sb.rpc("approve_character", { p_history_id: Number(b.dataset.approve) });
     if (e) { b.disabled = false; return fail(e); }
-    toast(`${name}’s name and title are approved.`);
+    toast(`${name}’s name and titles are approved.`);
     openSubmission(userId, name);
   });
 }
@@ -347,24 +399,26 @@ document.getElementById("sheet").addEventListener("click", e => { if (e.target.i
 // ---------- crew profiles ----------
 async function viewProfiles() {
   const [{ data: profiles }, { data: claims }, { data: roles }] = await Promise.all([
-    sb.from("profiles").select("id,display_name,avatar_path,approved_title,approved_character_name").order("display_name"),
+    sb.from("profiles").select("id,display_name,avatar_path,approved_titles,approved_character_name").order("display_name"),
     sb.from("claims").select("user_id,role_id,poke_type,status").neq("status", "rejected"),
     sb.from("roles").select("id,label"),
   ]);
   const roleLabel = Object.fromEntries((roles || []).map(r => [r.id, r.label]));
-  const claimOf = Object.fromEntries((claims || []).map(c => [c.user_id, c]));
+  const claimsOf = {};
+  (claims || []).forEach(c => (claimsOf[c.user_id] ||= []).push(c));
   const urls = await signedUrls("avatars", (profiles || []).map(p => p.avatar_path));
   app.innerHTML = `
     <h1 class="page-title">The Crew</h1>
     <div class="profile-grid">
       ${(profiles || []).map(p => {
-        const c = claimOf[p.id];
+        const cs = claimsOf[p.id] || [];
+        const titles = p.approved_titles || {};
         return `<a class="profile-card card" href="#/profile/${p.id}">
           ${avatarHtml(p, urls[p.avatar_path])}
           <p class="profile-name">${esc(p.display_name)}</p>
-          ${p.approved_title ? `<p class="profile-title">${esc(p.approved_title)}</p>` : ""}
           ${p.approved_character_name ? `<p class="profile-character">${esc(p.approved_character_name)}</p>` : ""}
-          ${c ? `<p class="muted">${esc(roleLabel[c.role_id])} ${typeChip(c.poke_type)}</p>` : `<p class="muted">No role yet</p>`}
+          ${cs.length ? cs.map(c => `<p class="muted">${titles[c.role_id] ? `<span class="profile-title">${esc(titles[c.role_id])}</span> · ` : ""}${esc(roleLabel[c.role_id])} ${typeChip(c.poke_type)}</p>`).join("")
+                      : `<p class="muted">No role yet</p>`}
         </a>`;
       }).join("")}
     </div>`;
@@ -372,9 +426,9 @@ async function viewProfiles() {
 
 async function viewProfile(id) {
   const isMe = id === state.user.id;
-  const [{ data: p, error }, { data: claim }, { data: roles }] = await Promise.all([
-    sb.from("profiles").select("id,display_name,avatar_path,approved_title,approved_character_name,approved_at").eq("id", id).single(),
-    sb.from("claims").select("role_id,poke_type,status").eq("user_id", id).neq("status", "rejected").maybeSingle(),
+  const [{ data: p, error }, { data: claims }, { data: roles }] = await Promise.all([
+    sb.from("profiles").select("id,display_name,avatar_path,approved_titles,approved_character_name,approved_at").eq("id", id).single(),
+    sb.from("claims").select("role_id,poke_type,status").eq("user_id", id).neq("status", "rejected").order("created_at"),
     sb.from("roles").select("id,label"),
   ]);
   if (error) return fail(error);
@@ -382,21 +436,24 @@ async function viewProfile(id) {
   const urls = await signedUrls("avatars", [p.avatar_path]);
   // Teams are private: only the owner and the admin can read characters (enforced by RLS)
   let ch = null;
-  if (isMe || state.profile.is_admin) ({ data: ch } = await sb.from("characters").select("team").eq("user_id", id).maybeSingle());
+  if (isMe || state.profile.is_admin) ({ data: ch } = await sb.from("characters").select("roles").eq("user_id", id).maybeSingle());
+  const titles = p.approved_titles || {};
   app.innerHTML = `
     <p><a href="#/profile" class="btn btn-ghost btn-small">← The Crew</a></p>
     <div class="profile-card card">
       ${avatarHtml(p, urls[p.avatar_path], true)}
       <h1 class="profile-name page-title">${esc(p.display_name)}</h1>
-      ${p.approved_title ? `<p class="profile-title">${esc(p.approved_title)}</p>` : ""}
       ${p.approved_character_name ? `<p class="profile-character">${esc(p.approved_character_name)}</p>` : `<p class="muted">Character not approved yet</p>`}
-      ${claim ? `<p>${esc(roleLabel[claim.role_id])} ${typeChip(claim.poke_type)} <span class="badge badge-${claim.status}">${claim.status === "approved" ? "Taken" : "Pending"}</span></p>` : `<p class="muted">No role yet</p>`}
+      ${(claims || []).length ? claims.map(c => `<p>${titles[c.role_id] ? `<span class="profile-title">${esc(titles[c.role_id])}</span><br>` : ""}${esc(roleLabel[c.role_id])} ${typeChip(c.poke_type)} <span class="badge badge-${c.status}">${c.status === "approved" ? "Taken" : "Pending"}</span></p>`).join("")
+                              : `<p class="muted">No role yet</p>`}
     </div>
     ${isMe || state.profile.is_admin ? `
     <div class="profile-private card stack">
       <p class="private-note">Only ${isMe ? "you" : esc(p.display_name)} and Abner can see this</p>
-      <h2 class="card-title">Team</h2>
-      ${(ch?.team || []).length ? `<ul>${ch.team.map(m => `<li>${esc(m.species)}${m.nickname ? ` “${esc(m.nickname)}”` : ""}</li>`).join("")}</ul>` : `<p class="muted">No team yet.</p>`}
+      <h2 class="card-title">Teams</h2>
+      ${Object.keys(ch?.roles || {}).length ? Object.entries(ch.roles).map(([k, r]) => `<div class="stack"><h3 class="team-section-title">${esc(roleLabel[k] || k)}</h3>
+        <p><b>First battle:</b> ${teamSummary(r.first_team)}</p><p><b>Rematch:</b> ${teamSummary(r.rematch_team)}</p></div>`).join("")
+        : `<p class="muted">No teams yet.</p>`}
     </div>` : ""}
     ${isMe ? `
     <form id="profedit" class="card stack"><h2 class="card-title">Edit my profile</h2>
@@ -428,65 +485,146 @@ async function viewProfile(id) {
   };
 }
 
-// ---------- my character ----------
+// ===== TEAM BUILDER (shared by My Character) =====
+function pokeSlotHtml(key, i, m) {
+  const id = `${key}-${i}`;
+  const g = m.gimmick || "None";
+  return `<div class="poke-slot stack">
+    <span class="poke-slot-num">${i + 1}</span>
+    <div class="field"><label for="sp-${id}">Pokémon</label><input id="sp-${id}" list="species" value="${esc(m.species)}" autocomplete="off"></div>
+    <div class="field"><label for="nn-${id}">Nickname</label><input id="nn-${id}" maxlength="12" value="${esc(m.nickname)}"></div>
+    <div class="field"><label for="it-${id}">Held item</label><input id="it-${id}" list="items" value="${esc(m.item)}" autocomplete="off"></div>
+    <div class="field"><label for="gm-${id}">Gimmick</label><select id="gm-${id}" data-gimmick="${id}">
+      ${GIMMICKS.map(x => `<option${x === g ? " selected" : ""}>${x}</option>`).join("")}</select></div>
+    <div class="field tera-field" id="tf-${id}" ${g === "Tera" ? "" : "hidden"}><label for="tt-${id}">Tera type</label><select id="tt-${id}">
+      <option value="">Pick…</option>${TERA_TYPES.map(t => `<option${t === m.tera ? " selected" : ""}>${t}</option>`).join("")}</select></div>
+    <div class="field"><label for="no-${id}">Note (moves, strategy…)</label><input id="no-${id}" maxlength="120" value="${esc(m.note)}"></div>
+  </div>`;
+}
+function readTeam(key, size) {
+  const out = [];
+  for (let i = 0; i < size; i++) {
+    const v = s => document.getElementById(`${s}-${key}-${i}`)?.value.trim() || "";
+    const m = { species: v("sp"), nickname: v("nn"), item: v("it"), gimmick: v("gm") || "None", tera: v("gm") === "Tera" ? v("tt") : "", note: v("no") };
+    if (m.species) out.push(m);
+  }
+  return out;
+}
+function teamProblem(team, label) {
+  const badSpecies = team.find(m => !SPECIES_SET.has(m.species));
+  if (badSpecies) return `${label}: “${badSpecies.species}” isn’t in the game’s Pokédex. Pick from the list.`;
+  const badItem = team.find(m => m.item && !ITEMS_SET.has(m.item));
+  if (badItem) return `${label}: “${badItem.item}” isn’t an item in the game. Pick from the list.`;
+  const noTera = team.find(m => m.gimmick === "Tera" && !m.tera);
+  if (noTera) return `${label}: pick a Tera type for ${noTera.species}.`;
+  return null;
+}
+function teamSummary(team) {
+  return (team || []).map(m => esc(m.species + (m.nickname ? ` “${m.nickname}”` : "")
+    + (m.item ? ` @ ${m.item}` : "") + (m.gimmick && m.gimmick !== "None" ? ` [${m.gimmick}${m.tera ? ` ${m.tera}` : ""}]` : "")
+    + (m.note ? ` (${m.note})` : ""))).join(", ") || "—";
+}
+
+// ===== MY CHARACTER =====
 async function signedLook(path) {
   if (!path) return null;
   const { data } = await sb.storage.from("looks").createSignedUrl(path, 3600);
   return data?.signedUrl || null;
 }
 async function viewMe() {
-  const { data: ch } = await sb.from("characters").select("*").eq("user_id", state.user.id).maybeSingle();
-  const c = ch || { character_name: "", title: "", team: [], look_note: "", look_image: null, dialogue: {}, notes: "" };
+  const [{ data: ch }, { data: claims }, { data: roles }] = await Promise.all([
+    sb.from("characters").select("*").eq("user_id", state.user.id).maybeSingle(),
+    sb.from("claims").select("*").eq("user_id", state.user.id).neq("status", "rejected").order("created_at"),
+    sb.from("roles").select("*"),
+  ]);
+  const c = ch || { character_name: "", look_note: "", look_image: null, notes: "", roles: {} };
+  const roleById = Object.fromEntries((roles || []).map(r => [r.id, r]));
   const prof = state.profile;
   const changedSinceApproval = prof.approved_at && ch && new Date(ch.updated_at) > new Date(prof.approved_at);
   const approvalHtml = prof.approved_at
-    ? `<p><span class="approved-mark">Approved ${esc(fmtDate(prof.approved_at))}</span> ${esc(prof.approved_title || "")} ${esc(prof.approved_character_name || "")}</p>
+    ? `<p><span class="approved-mark">Approved ${esc(fmtDate(prof.approved_at))}</span> ${esc(prof.approved_character_name || "")}</p>
        ${changedSinceApproval ? `<p class="hint">You changed things since then. Abner will review the new version.</p>` : ""}`
     : `<p class="muted">Not approved yet. Abner reviews every version you save.</p>`;
-  const team = Array.from({ length: 6 }, (_, i) => c.team[i] || { species: "", nickname: "", note: "" });
-  const d = c.dialogue || {};
   const lookUrl = await signedLook(c.look_image);
+  const myRoles = (claims || []).map(cl => ({ claim: cl, role: roleById[cl.role_id], data: (c.roles || {})[cl.role_id] || {} }));
+
+  const roleEntryHtml = ({ claim, role, data }) => {
+    const d = data.dialogue || {};
+    const k = role.id;
+    const first = Array.from({ length: role.first_team_size }, (_, i) => (data.first_team || [])[i] || {});
+    const rematch = Array.from({ length: 6 }, (_, i) => (data.rematch_team || [])[i] || {});
+    return `<section class="role-entry card stack">
+      <div class="role-entry-head"><h2 class="card-title">${esc(role.label)}</h2> ${typeChip(claim.poke_type)}
+        <span class="badge badge-${claim.status}">${claim.status}</span></div>
+      <div class="field"><label for="title-${k}">Title for this role</label><input id="title-${k}" maxlength="24" value="${esc(data.title)}" placeholder="${claim.poke_type ? `The ${esc(claim.poke_type)} Master` : "Shadow Agent"}">
+        <p class="hint">Shown before your name, like a trainer class.</p></div>
+      <div class="team-section first stack">
+        <div class="team-section-head"><h3 class="team-section-title">First battle</h3>
+          <span class="team-size-note">${role.first_team_size} Pokémon${claim.poke_type ? ` · ${esc(claim.poke_type)} specialist` : " · any type"}</span></div>
+        <div class="team-grid">${first.map((m, i) => pokeSlotHtml(`${k}-f`, i, m)).join("")}</div>
+      </div>
+      <div class="team-section rematch stack">
+        <div class="team-section-head"><h3 class="team-section-title">Rematch (after the Elite Four)</h3>
+          <span class="team-size-note">Full team of 6</span></div>
+        <div class="team-grid">${rematch.map((m, i) => pokeSlotHtml(`${k}-r`, i, m)).join("")}</div>
+      </div>
+      <div class="stack"><h3 class="team-section-title">What you say as ${esc(role.label)}</h3>
+        <div class="field"><label for="di-${k}">Before the battle</label><textarea id="di-${k}" rows="2" maxlength="300">${esc(d.intro)}</textarea></div>
+        <div class="field"><label for="dd-${k}">When you lose</label><textarea id="dd-${k}" rows="2" maxlength="300">${esc(d.defeat)}</textarea></div>
+        <div class="field"><label for="dx-${k}">Extra lines (one per line)</label><textarea id="dx-${k}" rows="3" maxlength="800">${esc((d.extra || []).join("\n"))}</textarea></div>
+      </div>
+    </section>`;
+  };
+
   app.innerHTML = `
   <h1 class="page-title">My Character</h1>
-  <p class="muted">Only you and Abner can see this page’s answers. Your approved name and title show on your Crew profile.</p>
+  <p class="muted">Only you and Abner can see this page’s answers. Teams stay secret so nobody can prep against you.</p>
+  <datalist id="species">${SPECIES.map(s => `<option value="${esc(s)}">`).join("")}</datalist>
+  <datalist id="items">${ITEMS.map(s => `<option value="${esc(s)}">`).join("")}</datalist>
   <form id="char" class="stack">
     <div class="card stack"><h2 class="card-title">Who are you in the game?</h2>
       ${ch ? `<p class="meta-date">Last saved ${esc(fmtDateTime(ch.updated_at))}</p>` : ""}
       ${approvalHtml}
       <div class="field"><label for="cname">Character name</label><input id="cname" maxlength="12" value="${esc(c.character_name)}">
-        <p class="hint">GBA names fit 12 characters.</p></div>
-      <div class="field"><label for="ctitle">Title</label><input id="ctitle" maxlength="24" value="${esc(c.title)}" placeholder="The Iron Wall">
-        <p class="hint">Shown before your name, like a trainer class.</p></div>
-    </div>
-    <div class="card stack"><h2 class="card-title">Your team (up to 6)</h2>
-      <datalist id="species">${SPECIES.map(s => `<option value="${esc(s)}">`).join("")}</datalist>
-      <div class="team-grid">
-        ${team.map((m, i) => `<div class="team-slot stack">
-          <div class="field"><label for="sp${i}">Pokémon ${i + 1}</label><input id="sp${i}" list="species" value="${esc(m.species)}" autocomplete="off"></div>
-          <div class="field"><label for="nn${i}">Nickname</label><input id="nn${i}" maxlength="12" value="${esc(m.nickname)}"></div>
-          <div class="field"><label for="no${i}">Note (moves, item…)</label><input id="no${i}" maxlength="120" value="${esc(m.note)}"></div>
-        </div>`).join("")}
-      </div>
+        <p class="hint">Same character in every role. GBA names fit 12 characters.</p></div>
     </div>
     <div class="card stack"><h2 class="card-title">Your look</h2>
       <div class="look-preview">${lookUrl ? `<img src="${esc(lookUrl)}" alt="Your look reference">` : `<p class="muted">No image yet.</p>`}</div>
       <div class="field"><label for="lookfile">Reference image (PNG, JPG or WebP, max 5 MB)</label><input id="lookfile" type="file" accept="image/png,image/jpeg,image/webp"></div>
       <div class="field"><label for="looknote">Describe it</label><textarea id="looknote" rows="3" maxlength="600">${esc(c.look_note)}</textarea></div>
     </div>
-    <div class="card stack"><h2 class="card-title">What you say</h2>
-      <div class="field"><label for="dintro">Before the battle</label><textarea id="dintro" rows="2" maxlength="300">${esc(d.intro)}</textarea></div>
-      <div class="field"><label for="ddefeat">When you lose</label><textarea id="ddefeat" rows="2" maxlength="300">${esc(d.defeat)}</textarea></div>
-      <div class="field"><label for="dextra">Extra lines (one per line)</label><textarea id="dextra" rows="3" maxlength="800">${esc((d.extra || []).join("\n"))}</textarea></div>
-    </div>
+    ${myRoles.length ? myRoles.map(roleEntryHtml).join("")
+      : `<div class="card"><p class="muted">Claim a role first, then build its teams here.</p><a class="btn btn-gold" href="#/roles">Pick a role</a></div>`}
     <div class="card stack"><h2 class="card-title">Anything else?</h2>
       <div class="field"><label for="notes">Notes for Abner</label><textarea id="notes" rows="3" maxlength="1000">${esc(c.notes)}</textarea></div>
     </div>
     <button class="btn btn-primary" type="submit">Save my character</button>
   </form>`;
 
+  app.querySelectorAll("[data-gimmick]").forEach(sel => sel.onchange = () => {
+    document.getElementById(`tf-${sel.dataset.gimmick}`).hidden = sel.value !== "Tera";
+  });
+
   document.getElementById("char").onsubmit = async e => {
     e.preventDefault();
     const btn = e.submitter; btn.disabled = true;
+    const rolesOut = {};
+    for (const { role } of myRoles) {
+      const k = role.id;
+      const first = readTeam(`${k}-f`, role.first_team_size), rematch = readTeam(`${k}-r`, 6);
+      const problem = teamProblem(first, `${role.label} first battle`) || teamProblem(rematch, `${role.label} rematch`);
+      if (problem) { btn.disabled = false; return toast(problem, true); }
+      rolesOut[k] = {
+        title: document.getElementById(`title-${k}`).value.trim(),
+        first_team: first,
+        rematch_team: rematch,
+        dialogue: {
+          intro: document.getElementById(`di-${k}`).value.trim(),
+          defeat: document.getElementById(`dd-${k}`).value.trim(),
+          extra: document.getElementById(`dx-${k}`).value.split("\n").map(s => s.trim()).filter(Boolean),
+        },
+      };
+    }
     let look_image = c.look_image;
     const file = document.getElementById("lookfile").files[0];
     if (file) {
@@ -498,29 +636,14 @@ async function viewMe() {
       if (error) { btn.disabled = false; return fail(error); }
       look_image = path; // old images are kept so the version history still shows them
     }
-    const teamOut = team.map((_, i) => ({
-      species: document.getElementById("sp" + i).value.trim(),
-      nickname: document.getElementById("nn" + i).value.trim(),
-      note: document.getElementById("no" + i).value.trim(),
-    })).filter(m => m.species);
-    const unknown = teamOut.find(m => !SPECIES.includes(m.species));
-    if (unknown) { btn.disabled = false; return toast(`“${unknown.species}” isn’t in the game’s Pokédex. Pick from the list.`, true); }
-    const row = {
+    const { error } = await sb.from("characters").upsert({
       user_id: state.user.id,
       character_name: document.getElementById("cname").value.trim(),
-      title: document.getElementById("ctitle").value.trim(),
-      team: teamOut,
       look_note: document.getElementById("looknote").value.trim(),
       look_image,
-      dialogue: {
-        intro: document.getElementById("dintro").value.trim(),
-        defeat: document.getElementById("ddefeat").value.trim(),
-        extra: document.getElementById("dextra").value.split("\n").map(s => s.trim()).filter(Boolean),
-      },
       notes: document.getElementById("notes").value.trim(),
-      updated_at: new Date().toISOString(),
-    };
-    const { error } = await sb.from("characters").upsert(row);
+      roles: rolesOut,
+    });
     btn.disabled = false;
     if (error) return fail(error);
     toast("Saved!"); viewMe();
@@ -573,12 +696,13 @@ async function viewIdeas(kind = "idea") {
 // ---------- admin ----------
 async function viewAdmin() {
   if (!state.profile.is_admin) { location.hash = "#/home"; return; }
-  const [{ data: roles }, { data: claims }, { data: profiles }, { data: chars }, { data: invites }] = await Promise.all([
+  const [{ data: roles }, { data: claims }, { data: profiles }, { data: chars }, { data: invites }, { data: requests }] = await Promise.all([
     sb.from("roles").select("*").order("sort"),
     sb.from("claims").select("*").order("created_at"),
     sb.from("profiles").select("*"),
     sb.from("characters").select("*"),
     sb.from("invites").select("*").order("added_at"),
+    sb.from("role_requests").select("*").order("created_at", { ascending: false }),
   ]);
   const who = names(profiles);
   const approvedOf = Object.fromEntries((profiles || []).map(p => [p.id, { title: p.approved_title, character_name: p.approved_character_name, approved_at: p.approved_at }]));
@@ -597,6 +721,29 @@ async function viewAdmin() {
         </td></tr>`).join("") || `<tr><td colspan="5" class="muted">No claims yet.</td></tr>`}</tbody>
     </table></div>
   </div>
+  <div class="request-card card stack"><h2 class="card-title">Custom role requests</h2>
+    ${(requests || []).length ? `<ul class="request-list">${requests.map(q => `<li class="request-item stack">
+      <p><b>${esc(who[q.user_id])}</b> wants <b>${esc(q.role_name)}</b> <span class="badge badge-${q.status}">${q.status}</span></p>
+      <p class="request-reason muted">${esc(q.reason)}</p><p class="meta-date">${esc(fmtDateTime(q.created_at))}</p>
+      ${q.status === "pending" ? `<div class="row">
+        <div class="field"><label for="rql-${q.id}">Role name</label><input id="rql-${q.id}" maxlength="40" value="${esc(q.role_name)}"></div>
+        <div class="field"><label for="rqs-${q.id}">First battle size</label><input id="rqs-${q.id}" class="size-input" type="number" min="1" max="6" value="4"></div>
+      </div>
+      <div class="admin-actions">
+        <button class="btn btn-primary btn-small" type="button" data-rq-approve="${q.id}">Approve &amp; create role</button>
+        <button class="btn btn-danger btn-small" type="button" data-rq-reject="${q.id}">Reject</button>
+      </div>` : ""}
+    </li>`).join("")}</ul>` : `<p class="muted">No requests yet.</p>`}
+  </div>
+  <form id="sizes" class="card stack"><h2 class="card-title">First-battle team sizes</h2>
+    <p class="muted">How many Pokémon each role uses in the first battle. Rematches are always 6.</p>
+    <div class="size-table table"><table>
+      <thead><tr><th>Role</th><th>First battle</th></tr></thead>
+      <tbody>${(roles || []).map(r => `<tr><td>${esc(r.label)}</td>
+        <td><input class="size-input" type="number" min="1" max="6" value="${r.first_team_size}" data-size-for="${esc(r.id)}" aria-label="First battle size for ${esc(r.label)}"></td></tr>`).join("")}</tbody>
+    </table></div>
+    <button class="btn btn-gold" type="submit">Save sizes</button>
+  </form>
   <form id="newupdate" class="card stack"><h2 class="card-title">Post a progress update</h2>
     <div class="field"><label for="utitle">Title</label><input id="utitle" required maxlength="120"></div>
     <div class="field"><label for="umile">Milestone tag (optional)</label><input id="umile" maxlength="40" placeholder="Gym 1 done"></div>
@@ -643,6 +790,34 @@ async function viewAdmin() {
     if (error) return fail(error);
     toast(`Claim ${b.dataset.status}.`); viewAdmin();
   });
+  app.querySelectorAll("[data-rq-approve]").forEach(b => b.onclick = async () => {
+    const id = b.dataset.rqApprove;
+    b.disabled = true;
+    const { error } = await sb.rpc("approve_role_request", {
+      p_id: Number(id),
+      p_label: document.getElementById(`rql-${id}`).value.trim(),
+      p_first_team_size: Number(document.getElementById(`rqs-${id}`).value) || 4,
+    });
+    if (error) { b.disabled = false; return fail(error); }
+    toast("Role created and assigned."); viewAdmin();
+  });
+  app.querySelectorAll("[data-rq-reject]").forEach(b => b.onclick = async () => {
+    const { error } = await sb.from("role_requests").update({ status: "rejected", decided_at: new Date().toISOString() }).eq("id", b.dataset.rqReject);
+    if (error) return fail(error);
+    toast("Request rejected."); viewAdmin();
+  });
+  document.getElementById("sizes").onsubmit = async e => {
+    e.preventDefault();
+    const changed = [...app.querySelectorAll("[data-size-for]")]
+      .map(i => ({ id: i.dataset.sizeFor, size: Number(i.value) }))
+      .filter(x => (roles || []).find(r => r.id === x.id)?.first_team_size !== x.size);
+    if (changed.find(x => !(x.size >= 1 && x.size <= 6))) return toast("Sizes must be between 1 and 6.", true);
+    for (const x of changed) {
+      const { error } = await sb.from("roles").update({ first_team_size: x.size }).eq("id", x.id);
+      if (error) return fail(error);
+    }
+    toast(changed.length ? `Saved ${changed.length} size${changed.length > 1 ? "s" : ""}.` : "Nothing changed."); viewAdmin();
+  };
   document.getElementById("newupdate").onsubmit = async e => {
     e.preventDefault();
     const { error } = await sb.from("updates").insert({
