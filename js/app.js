@@ -718,6 +718,7 @@ async function viewAdmin() {
         <td class="admin-actions">
           ${c.status !== "approved" ? `<button class="btn btn-primary btn-small" data-set="${c.id}" data-status="approved">Approve</button>` : ""}
           ${c.status !== "rejected" ? `<button class="btn btn-danger btn-small" data-set="${c.id}" data-status="rejected">Reject</button>` : ""}
+          <button class="btn btn-ghost btn-small" data-unclaim="${c.id}" data-who="${esc(who[c.user_id])}" data-role="${esc(roleLabel[c.role_id])}">Remove</button>
         </td></tr>`).join("") || `<tr><td colspan="5" class="muted">No claims yet.</td></tr>`}</tbody>
     </table></div>
   </div>
@@ -735,14 +736,40 @@ async function viewAdmin() {
       </div>` : ""}
     </li>`).join("")}</ul>` : `<p class="muted">No requests yet.</p>`}
   </div>
-  <form id="sizes" class="card stack"><h2 class="card-title">First-battle team sizes</h2>
-    <p class="muted">How many Pokémon each role uses in the first battle. Rematches are always 6.</p>
+  <form id="sizes" class="card stack"><h2 class="card-title">Roles &amp; team sizes</h2>
+    <p class="muted">First-battle size per role (rematches are always 6). Deleting a role also removes its claims and that role’s teams.</p>
     <div class="size-table table"><table>
-      <thead><tr><th>Role</th><th>First battle</th></tr></thead>
-      <tbody>${(roles || []).map(r => `<tr><td>${esc(r.label)}</td>
-        <td><input class="size-input" type="number" min="1" max="6" value="${r.first_team_size}" data-size-for="${esc(r.id)}" aria-label="First battle size for ${esc(r.label)}"></td></tr>`).join("")}</tbody>
+      <thead><tr><th>Role</th><th>Held by</th><th>First battle</th><th></th></tr></thead>
+      <tbody>${(roles || []).map(r => {
+        const holders = (claims || []).filter(c => c.role_id === r.id && c.status !== "rejected").map(c => who[c.user_id]);
+        return `<tr><td>${esc(r.label)}</td><td>${holders.length ? esc(holders.join(", ")) : `<span class="muted">open</span>`}</td>
+        <td><input class="size-input" type="number" min="1" max="6" value="${r.first_team_size}" data-size-for="${esc(r.id)}" aria-label="First battle size for ${esc(r.label)}"></td>
+        <td class="admin-actions"><button class="btn btn-danger btn-small" type="button" data-delrole="${esc(r.id)}" data-label="${esc(r.label)}" data-held="${holders.length}">Delete</button></td></tr>`;
+      }).join("")}</tbody>
     </table></div>
     <button class="btn btn-gold" type="submit">Save sizes</button>
+  </form>
+  <form id="assign" class="card stack"><h2 class="card-title">Assign a role</h2>
+    <p class="muted">Gives a friend a role, already approved. They can still only hold 2.</p>
+    <div class="field"><label for="as-user">Friend</label><select id="as-user" required>
+      <option value="">Pick a friend…</option>${(profiles || []).map(p => `<option value="${p.id}">${esc(p.display_name)}</option>`).join("")}</select></div>
+    <div class="field"><label for="as-role">Role</label><select id="as-role" required>
+      <option value="">Pick a role…</option>${(roles || []).filter(r => !(claims || []).some(c => c.role_id === r.id && c.status !== "rejected"))
+        .map(r => `<option value="${esc(r.id)}" data-needs-type="${r.needs_type}">${esc(r.label)}</option>`).join("")}</select></div>
+    <div class="field" id="as-type-field" hidden><label for="as-type">Type</label><select id="as-type">
+      <option value="">Pick a type…</option>${TYPES.filter(t => !(claims || []).some(c => c.poke_type === t && c.status !== "rejected")).map(t => `<option>${t}</option>`).join("")}</select></div>
+    <button class="btn btn-primary" type="submit">Assign role</button>
+  </form>
+  <form id="newrole" class="card stack"><h2 class="card-title">Create a role</h2>
+    <p class="muted">Add a slot yourself. Friends can then claim it (or assign it above).</p>
+    <div class="field"><label for="nr-label">Role name</label><input id="nr-label" maxlength="40" required placeholder="Team Aqua Admin"></div>
+    <div class="row">
+      <div class="field"><label for="nr-cat">Kind</label><select id="nr-cat">
+        <option value="custom">Custom (no type)</option><option value="gym">Gym Leader (type)</option><option value="elite4">Elite Four (type)</option>
+        <option value="aqua">Team Aqua</option><option value="magma">Team Magma</option><option value="professor">Professor</option></select></div>
+      <div class="field"><label for="nr-size">First battle size</label><input id="nr-size" class="size-input" type="number" min="1" max="6" value="4"></div>
+    </div>
+    <button class="btn btn-gold" type="submit">Create role</button>
   </form>
   <form id="newupdate" class="card stack"><h2 class="card-title">Post a progress update</h2>
     <div class="field"><label for="utitle">Title</label><input id="utitle" required maxlength="120"></div>
@@ -806,6 +833,44 @@ async function viewAdmin() {
     if (error) return fail(error);
     toast("Request rejected."); viewAdmin();
   });
+  app.querySelectorAll("[data-unclaim]").forEach(b => b.onclick = async () => {
+    if (!confirm(`Remove ${b.dataset.who} from ${b.dataset.role}? Their teams for that role are removed too.`)) return;
+    const { error } = await sb.from("claims").delete().eq("id", b.dataset.unclaim);
+    if (error) return fail(error);
+    toast("Claim removed."); viewAdmin();
+  });
+  app.querySelectorAll("[data-delrole]").forEach(b => b.onclick = async () => {
+    const held = Number(b.dataset.held);
+    if (!confirm(`Delete the role “${b.dataset.label}”?${held ? " Whoever holds it loses the role and its teams." : ""} This can’t be undone.`)) return;
+    const { error } = await sb.rpc("admin_delete_role", { p_role: b.dataset.delrole });
+    if (error) return fail(error);
+    toast("Role deleted."); viewAdmin();
+  });
+  const asRole = document.getElementById("as-role");
+  asRole.onchange = () => {
+    document.getElementById("as-type-field").hidden = asRole.selectedOptions[0]?.dataset.needsType !== "true";
+  };
+  document.getElementById("assign").onsubmit = async e => {
+    e.preventDefault();
+    const needsType = asRole.selectedOptions[0]?.dataset.needsType === "true";
+    const type = document.getElementById("as-type").value;
+    if (needsType && !type) return toast("Gym and Elite Four roles need a type.", true);
+    const { error } = await sb.rpc("admin_assign_role", {
+      p_user: document.getElementById("as-user").value, p_role: asRole.value, p_type: needsType ? type : null,
+    });
+    if (error) return fail(error);
+    toast("Role assigned."); viewAdmin();
+  };
+  document.getElementById("newrole").onsubmit = async e => {
+    e.preventDefault();
+    const { error } = await sb.rpc("admin_create_role", {
+      p_label: document.getElementById("nr-label").value.trim(),
+      p_category: document.getElementById("nr-cat").value,
+      p_first_team_size: Number(document.getElementById("nr-size").value) || 4,
+    });
+    if (error) return fail(error);
+    toast("Role created."); viewAdmin();
+  };
   document.getElementById("sizes").onsubmit = async e => {
     e.preventDefault();
     const changed = [...app.querySelectorAll("[data-size-for]")]
