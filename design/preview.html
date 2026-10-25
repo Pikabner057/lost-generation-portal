@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Emerald Lost Generation — Design Preview</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Nunito+Sans:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="../css/theme.css">
+</head>
+<body>
+  <header class="app-header">
+    <a class="brand" href="#top">Emerald Lost Generation</a>
+    <nav class="nav" aria-label="Main navigation">
+      <a class="active" href="#roster">Roster</a><a href="#team">Teams</a><a href="#updates">Updates</a><a href="#admin">Admin</a>
+    </nav>
+    <button class="btn btn-ghost theme-toggle" id="theme-toggle" type="button" aria-pressed="false">☼ Light mode</button>
+  </header>
+
+  <main class="container" id="top">
+    <h1 class="page-title">Hoenn, <span>together.</span></h1>
+    <div class="stack">
+      <section class="card" id="roster">
+        <div class="row" style="justify-content:space-between">
+          <div><h2 class="card-title">League roster</h2><p class="muted">Eight friends. One region. Let’s build something legendary.</p></div>
+          <button class="btn btn-primary">Claim a slot</button>
+        </div>
+        <div class="grid">
+          <article class="slot is-reserved">
+            <div class="slot-head">Gym Leader 3 <span class="badge badge-open">Open</span></div>
+            <div class="slot-holder">Fire specialist · seeking a challenger</div>
+            <div class="row" style="margin-top:12px"><span class="type-chip" data-type="Fire">Fire</span><button class="btn btn-gold btn-small">Claim slot</button></div>
+          </article>
+          <article class="slot is-mine">
+            <div class="slot-head">Elite Four 1 <span class="badge badge-approved">Approved</span></div>
+            <div class="slot-holder">Abner · Steel specialist</div>
+            <div class="row" style="margin-top:12px"><span class="type-chip" data-type="Steel">Steel</span><span class="badge badge-taken">Taken</span></div>
+          </article>
+          <article class="slot">
+            <div class="slot-head">Gym Leader 1 <span class="badge badge-pending">Pending</span></div>
+            <div class="slot-holder">Mika · waiting for review</div>
+            <div class="row" style="margin-top:12px"><span class="type-chip" data-type="Grass">Grass</span><span class="badge badge-reserved">Reserved</span></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="grid">
+        <article class="card">
+          <h2 class="card-title">Your trainer card</h2>
+          <div class="field"><label for="trainer-name">Trainer name</label><input id="trainer-name" value="Abner" placeholder="Choose a name"><span class="hint">This is how the crew will see you.</span></div>
+          <div class="field" style="margin-top:12px"><label for="specialty">Type specialty</label><select id="specialty"><option>Steel</option><option>Water</option></select></div>
+          <div class="field" style="margin-top:12px"><label for="bio">Trainer bio</label><textarea id="bio">Building a sturdy team from the ground up.</textarea><span class="error-text">Please add a short trainer bio.</span></div>
+          <div class="row" style="margin-top:16px"><button class="btn btn-primary">Save profile</button><button class="btn btn-ghost">Preview card</button><button class="btn btn-danger">Leave roster</button><button class="btn btn-primary btn-small" disabled>Saving…</button></div>
+        </article>
+        <article class="card" id="team">
+          <h2 class="card-title">Abner’s team draft</h2>
+          <div class="team-grid">
+            <div class="team-slot"><div><strong>Aggron</strong><br><span class="type-chip" data-type="Steel">Steel</span> <span class="type-chip" data-type="Rock">Rock</span></div></div>
+            <div class="team-slot"><div><strong>Magnezone</strong><br><span class="type-chip" data-type="Electric">Electric</span> <span class="type-chip" data-type="Steel">Steel</span></div></div>
+            <div class="team-slot">Choose a Pokémon</div><div class="team-slot">Choose a Pokémon</div><div class="team-slot">Choose a Pokémon</div><div class="team-slot">Choose a Pokémon</div>
+          </div>
+        </article>
+      </section>
+
+      <section class="grid" id="updates">
+        <article class="post idea"><div class="post-meta"><strong>Rin</strong><span>·</span><time datetime="2026-10-24">Yesterday</time><span class="badge badge-pending">Idea</span></div><p class="post-body">What if the abandoned ship had a hidden room with a team-up battle? I can sketch the encounter this weekend.</p></article>
+        <article class="update"><span class="milestone">Milestone 02</span><h2 class="card-title" style="margin-top:10px">First pass of the map is ready</h2><p class="post-body">Route 110 and Mauville are blocked in. Next up: the desert path and a few secrets.</p><div class="post-meta" style="margin-top:10px">Posted by Jo · 3 comments</div></article>
+        <article class="card"><h2 class="card-title">Preview encounter art</h2><div class="look-preview"><img alt="Emerald-toned pixel landscape placeholder" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 800 450'%3E%3Crect width='800' height='450' fill='%2308130f'/%3E%3Cpath d='M0 300 180 120l140 180 170-220 310 220v150H0' fill='%2300a86b'/%3E%3Cpath d='M0 360h800v90H0' fill='%2368b7c9'/%3E%3Ccircle cx='650' cy='90' r='36' fill='%23f2c14e'/%3E%3C/svg%3E"></div><p class="muted">Route 119 · early color pass</p></article>
+      </section>
+
+      <section class="card" id="admin">
+        <div class="row" style="justify-content:space-between"><h2 class="card-title">Pending approvals</h2><span class="loading">Syncing latest roster…</span></div>
+        <div class="toast">Profile update saved. Your trainer card is ready.</div>
+        <p class="toast error" style="margin-top:12px">Couldn’t save that post. Check your connection and try again.</p>
+        <div class="table" style="margin-top:16px"><table><thead><tr><th>Friend</th><th>Request</th><th>Specialty</th><th>Status</th><th>Actions</th></tr></thead><tbody>
+          <tr><td>Mika</td><td>Gym Leader 1</td><td><span class="type-chip" data-type="Grass">Grass</span></td><td><span class="badge badge-pending">Pending</span></td><td><div class="admin-actions"><button class="btn btn-primary btn-small">Approve</button><button class="btn btn-danger btn-small">Reject</button></div></td></tr>
+          <tr><td>Abner</td><td>Elite Four 1</td><td><span class="type-chip" data-type="Steel">Steel</span></td><td><span class="badge badge-approved">Approved</span></td><td><div class="admin-actions"><button class="btn btn-ghost btn-small">Edit</button></div></td></tr>
+        </tbody></table></div>
+      </section>
+
+      <section class="card"><h2 class="card-title">Pokédex type index</h2><div class="row">
+        <span class="type-chip" data-type="Normal">Normal</span><span class="type-chip" data-type="Fire">Fire</span><span class="type-chip" data-type="Water">Water</span><span class="type-chip" data-type="Grass">Grass</span><span class="type-chip" data-type="Electric">Electric</span><span class="type-chip" data-type="Ice">Ice</span><span class="type-chip" data-type="Fighting">Fighting</span><span class="type-chip" data-type="Poison">Poison</span><span class="type-chip" data-type="Ground">Ground</span><span class="type-chip" data-type="Flying">Flying</span><span class="type-chip" data-type="Psychic">Psychic</span><span class="type-chip" data-type="Bug">Bug</span><span class="type-chip" data-type="Rock">Rock</span><span class="type-chip" data-type="Ghost">Ghost</span><span class="type-chip" data-type="Dragon">Dragon</span><span class="type-chip" data-type="Dark">Dark</span><span class="type-chip" data-type="Steel">Steel</span><span class="type-chip" data-type="Fairy">Fairy</span>
+      </div></section>
+      <section class="auth-wrap"><article class="auth-card"><span class="milestone">Members only</span><h2 class="page-title" style="margin-top:12px">Welcome back, trainer.</h2><p class="muted">Sign in to check the roster and catch up with the crew.</p><div class="field"><label for="email">Email address</label><input id="email" type="email" placeholder="you@example.com"></div><button class="btn btn-primary" style="width:100%;margin-top:16px">Send sign-in link</button></article></section>
+    </div>
+  </main>
+  <script>
+    const toggle = document.querySelector('#theme-toggle');
+    toggle.addEventListener('click', () => {
+      const light = document.documentElement.dataset.theme !== 'light';
+      document.documentElement.dataset.theme = light ? 'light' : 'dark';
+      toggle.textContent = light ? '◐ Dark mode' : '☼ Light mode';
+      toggle.setAttribute('aria-pressed', String(light));
+    });
+  </script>
+</body>
+</html>
