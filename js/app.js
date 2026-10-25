@@ -610,7 +610,10 @@ async function route() {
 }
 window.addEventListener("hashchange", route);
 
-sb.auth.onAuthStateChange(async (event, session) => {
+// Never await Supabase calls directly inside this callback: supabase-js holds its auth lock while
+// the callback runs, so a query there can deadlock (e.g. on token refresh). Defer the work instead.
+sb.auth.onAuthStateChange((event, session) => { setTimeout(() => handleAuth(event, session), 0); });
+async function handleAuth(event, session) {
   if (event === "PASSWORD_RECOVERY") recovering = true;
   if (event === "USER_UPDATED") recovering = false;
   const user = session?.user || null;
@@ -619,4 +622,4 @@ sb.auth.onAuthStateChange(async (event, session) => {
     state.profile = user ? await loadProfile() : null;
   }
   if (event === "INITIAL_SESSION" || event === "SIGNED_IN" || event === "SIGNED_OUT" || event === "PASSWORD_RECOVERY") route();
-});
+}
