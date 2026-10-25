@@ -1,0 +1,8 @@
+/* Spark's app-specific additions on top of Codex's theme.css */
+[hidden] { display: none !important; }
+#toasts { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 50;
+  display: flex; flex-direction: column; gap: 8px; width: min(92vw, 420px); }
+@media (max-width: 520px) { .team-grid { grid-template-columns: 1fr; } }
+.app-header { flex-wrap: wrap; }
+#theme-toggle-auth { position: fixed; top: 12px; right: 12px; z-index: 40; }
+details.post > summary { cursor: pointer; }
