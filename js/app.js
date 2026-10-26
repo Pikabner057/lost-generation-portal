@@ -4,6 +4,7 @@
 import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm";
 import { SPECIES } from "./species.js";
 import { ITEMS } from "./items.js";
+import { ABILITIES, MOVES } from "./pokedata.js";
 
 const SUPABASE_URL = "https://ejworaccnktuzlevzydn.supabase.co";
 const SUPABASE_KEY = "sb_publishable_Xm5oe0vRFaizEggFh_gFEQ_a1p5TdYe"; // public by design
@@ -14,7 +15,7 @@ const TYPES = ["Normal","Fire","Water","Grass","Electric","Ice","Fighting","Pois
 const TERA_TYPES = [...TYPES, "Stellar"];
 const GIMMICKS = ["None", "Mega", "Z-Move", "Dynamax", "Tera"];
 const MAX_ROLES = 2;
-const SPECIES_SET = new Set(SPECIES), ITEMS_SET = new Set(ITEMS);
+const SPECIES_SET = new Set(SPECIES), ITEMS_SET = new Set(ITEMS), MOVES_SET = new Set(MOVES);
 const app = document.getElementById("app");
 const state = { user: null, profile: null };
 
@@ -343,6 +344,7 @@ function characterDetails(s, imgUrl, roleLabel = {}) {
   const perRole = Object.entries(s.roles || {}).map(([k, r]) => {
     const d = r.dialogue || {};
     return `<div class="role-entry stack"><h3 class="card-title">${esc(roleLabel[k] || k)}${r.title ? `: ${esc(r.title)}` : ""}</h3>
+      ${r.signature_move?.name ? `<p><b>Signature move:</b> ${esc(r.signature_move.name)}${r.signature_move.description ? `: ${esc(r.signature_move.description)}` : ""}</p>` : ""}
       <p><b>First battle:</b> ${teamSummary(r.first_team)}</p>
       <p><b>Rematch:</b> ${teamSummary(r.rematch_team)}</p>
       <p><b>Before battle:</b> ${esc(d.intro || "—")}</p>
@@ -486,26 +488,36 @@ async function viewProfile(id) {
 }
 
 // ===== TEAM BUILDER (shared by My Character) =====
+function abilityOptions(species, current) {
+  const list = ABILITIES[species] || [];
+  if (!list.length) return `<option value="">Pick a Pokémon first</option>`;
+  return `<option value="">Pick an ability…</option>` + list.map(a => `<option${a === current ? " selected" : ""}>${esc(a)}</option>`).join("");
+}
 function pokeSlotHtml(key, i, m) {
   const id = `${key}-${i}`;
   const g = m.gimmick || "None";
   return `<div class="poke-slot stack">
     <span class="poke-slot-num">${i + 1}</span>
-    <div class="field"><label for="sp-${id}">Pokémon</label><input id="sp-${id}" list="species" value="${esc(m.species)}" autocomplete="off"></div>
+    <div class="field"><label for="sp-${id}">Pokémon</label><input id="sp-${id}" list="species" value="${esc(m.species)}" autocomplete="off" data-species-for="${id}"></div>
     <div class="field"><label for="nn-${id}">Nickname</label><input id="nn-${id}" maxlength="12" value="${esc(m.nickname)}"></div>
     <div class="field"><label for="it-${id}">Held item</label><input id="it-${id}" list="items" value="${esc(m.item)}" autocomplete="off"></div>
+    <div class="field"><label for="ab-${id}">Ability</label><select id="ab-${id}" data-ability-for="${id}">${abilityOptions(m.species, m.ability)}</select></div>
+    <div class="moves-grid">${[0, 1, 2, 3].map(j => `<div class="field"><label for="mv-${id}-${j}">Move ${j + 1}</label>
+      <input id="mv-${id}-${j}" list="moves" value="${esc((m.moves || [])[j])}" autocomplete="off"></div>`).join("")}</div>
     <div class="field"><label for="gm-${id}">Gimmick</label><select id="gm-${id}" data-gimmick="${id}">
       ${GIMMICKS.map(x => `<option${x === g ? " selected" : ""}>${x}</option>`).join("")}</select></div>
     <div class="field tera-field" id="tf-${id}" ${g === "Tera" ? "" : "hidden"}><label for="tt-${id}">Tera type</label><select id="tt-${id}">
       <option value="">Pick…</option>${TERA_TYPES.map(t => `<option${t === m.tera ? " selected" : ""}>${t}</option>`).join("")}</select></div>
-    <div class="field"><label for="no-${id}">Note (moves, strategy…)</label><input id="no-${id}" maxlength="120" value="${esc(m.note)}"></div>
+    <div class="field"><label for="no-${id}">Note (strategy, EVs, nature…)</label><input id="no-${id}" maxlength="120" value="${esc(m.note)}"></div>
   </div>`;
 }
 function readTeam(key, size) {
   const out = [];
   for (let i = 0; i < size; i++) {
     const v = s => document.getElementById(`${s}-${key}-${i}`)?.value.trim() || "";
-    const m = { species: v("sp"), nickname: v("nn"), item: v("it"), gimmick: v("gm") || "None", tera: v("gm") === "Tera" ? v("tt") : "", note: v("no") };
+    const moves = [0, 1, 2, 3].map(j => document.getElementById(`mv-${key}-${i}-${j}`)?.value.trim() || "").filter(Boolean);
+    const m = { species: v("sp"), nickname: v("nn"), item: v("it"), ability: v("ab"), moves,
+      gimmick: v("gm") || "None", tera: v("gm") === "Tera" ? v("tt") : "", note: v("no") };
     if (m.species) out.push(m);
   }
   return out;
@@ -515,13 +527,21 @@ function teamProblem(team, label) {
   if (badSpecies) return `${label}: “${badSpecies.species}” isn’t in the game’s Pokédex. Pick from the list.`;
   const badItem = team.find(m => m.item && !ITEMS_SET.has(m.item));
   if (badItem) return `${label}: “${badItem.item}” isn’t an item in the game. Pick from the list.`;
+  const badAbility = team.find(m => m.ability && !(ABILITIES[m.species] || []).includes(m.ability));
+  if (badAbility) return `${label}: ${badAbility.species} can’t have ${badAbility.ability}.`;
+  const badMove = team.find(m => (m.moves || []).some(x => !MOVES_SET.has(x)));
+  if (badMove) return `${label}: “${badMove.moves.find(x => !MOVES_SET.has(x))}” isn’t a move in the game. Pick from the list.`;
+  const dupMove = team.find(m => new Set(m.moves || []).size !== (m.moves || []).length);
+  if (dupMove) return `${label}: ${dupMove.species} has the same move twice.`;
   const noTera = team.find(m => m.gimmick === "Tera" && !m.tera);
   if (noTera) return `${label}: pick a Tera type for ${noTera.species}.`;
   return null;
 }
 function teamSummary(team) {
   return (team || []).map(m => esc(m.species + (m.nickname ? ` “${m.nickname}”` : "")
-    + (m.item ? ` @ ${m.item}` : "") + (m.gimmick && m.gimmick !== "None" ? ` [${m.gimmick}${m.tera ? ` ${m.tera}` : ""}]` : "")
+    + (m.item ? ` @ ${m.item}` : "") + (m.ability ? ` · ${m.ability}` : "")
+    + ((m.moves || []).length ? ` · ${m.moves.join(" / ")}` : "")
+    + (m.gimmick && m.gimmick !== "None" ? ` [${m.gimmick}${m.tera ? ` ${m.tera}` : ""}]` : "")
     + (m.note ? ` (${m.note})` : ""))).join(", ") || "—";
 }
 
@@ -558,6 +578,12 @@ async function viewMe() {
         <span class="badge badge-${claim.status}">${claim.status}</span></div>
       <div class="field"><label for="title-${k}">Title for this role</label><input id="title-${k}" maxlength="24" value="${esc(data.title)}" placeholder="${claim.poke_type ? `The ${esc(claim.poke_type)} Master` : "Shadow Agent"}">
         <p class="hint">Shown before your name, like a trainer class.</p></div>
+      ${role.category === "gym" ? `<div class="signature-move stack">
+        <h3 class="signature-title">Signature move</h3>
+        <p class="hint">Gym Leaders only. Pick a move or invent your own.</p>
+        <div class="field"><label for="sig-${k}">Move</label><input id="sig-${k}" list="moves" maxlength="40" value="${esc(data.signature_move?.name)}" autocomplete="off"></div>
+        <div class="field"><label for="sigd-${k}">What it does</label><textarea id="sigd-${k}" rows="2" maxlength="300">${esc(data.signature_move?.description)}</textarea></div>
+      </div>` : ""}
       <div class="team-section first stack">
         <div class="team-section-head"><h3 class="team-section-title">First battle</h3>
           <span class="team-size-note">${role.first_team_size} Pokémon${claim.poke_type ? ` · ${esc(claim.poke_type)} specialist` : " · any type"}</span></div>
@@ -581,6 +607,7 @@ async function viewMe() {
   <p class="muted">Only you and Abner can see this page’s answers. Teams stay secret so nobody can prep against you.</p>
   <datalist id="species">${SPECIES.map(s => `<option value="${esc(s)}">`).join("")}</datalist>
   <datalist id="items">${ITEMS.map(s => `<option value="${esc(s)}">`).join("")}</datalist>
+  <datalist id="moves">${MOVES.map(s => `<option value="${esc(s)}">`).join("")}</datalist>
   <form id="char" class="stack">
     <div class="card stack"><h2 class="card-title">Who are you in the game?</h2>
       ${ch ? `<p class="meta-date">Last saved ${esc(fmtDateTime(ch.updated_at))}</p>` : ""}
@@ -601,6 +628,10 @@ async function viewMe() {
     <button class="btn btn-primary" type="submit">Save my character</button>
   </form>`;
 
+  app.querySelectorAll("[data-species-for]").forEach(inp => inp.onchange = () => {
+    const sel = document.getElementById(`ab-${inp.dataset.speciesFor}`);
+    sel.innerHTML = abilityOptions(inp.value.trim(), sel.value);
+  });
   app.querySelectorAll("[data-gimmick]").forEach(sel => sel.onchange = () => {
     document.getElementById(`tf-${sel.dataset.gimmick}`).hidden = sel.value !== "Tera";
   });
@@ -616,6 +647,10 @@ async function viewMe() {
       if (problem) { btn.disabled = false; return toast(problem, true); }
       rolesOut[k] = {
         title: document.getElementById(`title-${k}`).value.trim(),
+        ...(role.category === "gym" ? { signature_move: {
+          name: document.getElementById(`sig-${k}`).value.trim(),
+          description: document.getElementById(`sigd-${k}`).value.trim(),
+        } } : {}),
         first_team: first,
         rematch_team: rematch,
         dialogue: {
