@@ -220,14 +220,25 @@ dialog.sheet::backdrop, .panel::backdrop { background: rgb(0 0 0 / 68%); }
 .poke-slot .field { min-width: 0; }
 .poke-slot .field label { font-size: var(--text-xs); }
 .poke-slot input, .poke-slot select { min-height: 42px; padding: .55rem .65rem; }
+.moves-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); min-width: 0; }
+.signature-move { min-width: 0; margin: var(--space-4) 0; padding: var(--space-4); border: 1px solid var(--gold); border-inline-start: 4px solid var(--gold); border-radius: var(--radius-small); background: var(--surface); }
+.signature-title { margin: 0 0 var(--space-3); color: var(--gold); font: 700 var(--text-lg)/1.2 var(--font-display); }
+.signature-move > .field + .field { margin-top: var(--space-3); }
 .poke-slot .tera-field[hidden] { display: none; }
 .request-card { min-width: 0; padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); }
 .request-list { display: grid; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
 .request-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: var(--space-2) var(--space-3); padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius-small); background: var(--surface-raised); }
+.request-item.stack > * { grid-column: 1 / -1; min-width: 0; }
+.request-item.stack > .row { align-items: end; }
+.request-item.stack > .row > .field:first-child { flex: 1 1 220px; }
+.request-item.stack > .row > .field:last-child { flex: 0 1 8rem; }
 .request-item > div { min-width: 0; }
 .request-item .request-reason { display: block; color: var(--muted); font-size: var(--text-sm); }
 .request-item .meta-date { grid-column: 1 / -1; }
 .request-item .admin-actions { grid-column: 1 / -1; }
+@media (min-width: 340px) {
+  .moves-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .size-table { width: 100%; overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-small); }
 .size-table table { width: 100%; min-width: 360px; border-collapse: collapse; }
 .size-table th, .size-table td { padding: .55rem .75rem; border-bottom: 1px solid var(--border); text-align: left; }
