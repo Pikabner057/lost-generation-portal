@@ -253,8 +253,9 @@ async function viewRoles() {
   const who = names(profiles);
   const bySlot = Object.fromEntries((claims || []).map(c => [c.role_id, c]));
   const mine = (claims || []).filter(c => c.user_id === state.user.id);
-  const canClaim = mine.length < MAX_ROLES;
-  const second = mine.length === 1;
+  const isAdmin = state.profile.is_admin;  // the admin can hold any number of roles (schema v7)
+  const canClaim = isAdmin || mine.length < MAX_ROLES;
+  const second = !isAdmin && mine.length === 1;
   const takenTypes = new Set((claims || []).map(c => c.poke_type).filter(Boolean));
   const freeTypes = TYPES.filter(t => !takenTypes.has(t));
 
@@ -283,7 +284,8 @@ async function viewRoles() {
   };
   app.innerHTML = `
     <h1 class="page-title">Roles</h1>
-    <p class="muted">${mine.length === 0 ? "Claim a slot. Gym Leaders and the Elite Four each pick a type nobody else has."
+    <p class="muted">${isAdmin ? `You hold ${mine.length} role${mine.length === 1 ? "" : "s"}. As admin you can claim as many as you need.`
+      : mine.length === 0 ? "Claim a slot. Gym Leaders and the Elite Four each pick a type nobody else has."
       : mine.length === 1 ? "You have 1 role. You can claim a second one if you tell Abner why."
       : "You hold the maximum of 2 roles."} Abner approves every claim.</p>
     ${group("Gym Leaders", ["gym"])}
