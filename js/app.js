@@ -1,7 +1,7 @@
 // Emerald Lost Generation: Friend Portal
 // Static single-page app. All access control lives in the database (RLS);
 // this file only decides what to show.
-import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm";
+import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/+esm";
 import { SPECIES } from "./species.js";
 import { ITEMS } from "./items.js";
 import { ABILITIES, MOVES } from "./pokedata.js";
@@ -35,7 +35,10 @@ function toast(msg, isError = false) {
     x.type = "button"; x.className = "toast-close"; x.textContent = "Close";
     x.onclick = () => el.remove();
     el.append(" ", x);
-  } else setTimeout(() => el.remove(), 4500);
+  } else {
+    document.querySelectorAll(".toast.error").forEach(t => t.remove()); // a success replaces old errors
+    setTimeout(() => el.remove(), 4500);
+  }
   // Above an open dialog (top layer) when there is one
   const sheet = document.getElementById("sheet");
   (sheet?.open ? sheet : document.body).appendChild(document.getElementById("toasts")).appendChild(el);
@@ -104,6 +107,7 @@ function showShell(signedIn) {
 document.getElementById("logout").onclick = async () => {
   if (state.dirty && !confirm("You have unsaved changes. Log out without saving?")) return;
   state.dirty = false;
+  authLog({ event: "tapped Log out", user: true });
   await sb.auth.signOut(); location.hash = "";
 };
 
@@ -111,6 +115,41 @@ async function loadProfile() {
   const { data, error } = await sb.from("profiles").select("*").eq("id", state.user.id).single();
   if (error) { fail(error); return null; }
   return data;
+}
+
+// ---------- pictures ----------
+// Phone photos are often 3-8 MB (and sometimes HEIC). Shrink them in the browser before uploading,
+// so any normal photo works and uploads stay small.
+async function shrinkImage(file, maxSide, keepAlpha) {
+  const heic = /hei[cf]/i.test(file.type + file.name);
+  let bmp;
+  try { bmp = await createImageBitmap(file); }
+  catch (e) {
+    throw new Error(heic ? "This photo is in HEIC format, which the browser can’t read. Take a screenshot of it and upload that, or set the camera to save as JPG."
+                         : "Couldn’t read that picture. Try a different one (PNG, JPG or WebP).");
+  }
+  const s = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(bmp.width * s)); canvas.height = Math.max(1, Math.round(bmp.height * s));
+  canvas.getContext("2d").drawImage(bmp, 0, 0, canvas.width, canvas.height);
+  bmp.close?.();
+  const toBlob = (type, q) => new Promise(r => canvas.toBlob(r, type, q));
+  let blob = await toBlob("image/webp", 0.86);
+  if (!blob || blob.type !== "image/webp") blob = await toBlob(keepAlpha ? "image/png" : "image/jpeg", 0.88); // Safari can't make WebP
+  if (!blob) throw new Error("Couldn’t prepare that picture. Try a different one.");
+  return blob;
+}
+const IMG_EXT = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" };
+// Show the chosen picture right away, so it's clear it was picked and still needs Save
+function previewOnPick(input, box) {
+  input.addEventListener("change", () => {
+    const file = input.files[0];
+    if (!file) { box.innerHTML = ""; return; }
+    const url = URL.createObjectURL(file);
+    box.innerHTML = `<img src="${url}" alt="Picture you picked"><p class="hint">Picked. Tap Save to upload it.</p>`;
+    const img = box.querySelector("img");
+    img.onerror = () => img.remove(); // e.g. HEIC: the browser can't show it (Save explains why)
+  });
 }
 
 // ---------- auth views ----------
@@ -130,6 +169,7 @@ function viewLogin() {
     <hr>
     <p class="muted">First time here? Abner added your email to the invite list.</p>
     <button class="btn btn-gold" id="to-signup" type="button">Create my account</button>
+    ${authLogHtml()}
   </div></div>`;
   document.getElementById("to-signup").onclick = viewSignup;
   document.getElementById("login").onsubmit = async e => {
@@ -681,11 +721,10 @@ async function saveCharacter(c, myRoles, patch) {
 async function uploadLook(input) {
   const file = input.files[0];
   if (!file) return undefined;
-  if (file.size > 5 * 1024 * 1024) { toast("Image is over 5 MB.", true); return false; }
-  const ext = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" }[file.type];
-  if (!ext) { toast("Use PNG, JPG or WebP.", true); return false; }
-  const path = `${state.user.id}/look-${Date.now()}.${ext}`;
-  const { error } = await sb.storage.from("looks").upload(path, file, { contentType: file.type });
+  let blob;
+  try { blob = await shrinkImage(file, 1600, true); } catch (e) { toast(e.message, true); return false; }
+  const path = `${state.user.id}/look-${Date.now()}.${IMG_EXT[blob.type]}`;
+  const { error } = await sb.storage.from("looks").upload(path, blob, { contentType: blob.type });
   if (error) { fail(error); return false; }
   return path; // old images are kept so the version history still shows them
 }
@@ -725,19 +764,21 @@ async function viewMeProfile() {
   </div>
   <form id="profform" class="card stack"><h2 class="card-title">Your profile</h2>
     <div class="field"><label for="pname">Username</label><input id="pname" name="nickname" maxlength="24" autocomplete="nickname" spellcheck="false" value="${esc(prof.display_name)}"></div>
-    <div class="field"><label for="pavatar">Profile picture (PNG, JPG or WebP, max 2 MB)</label><input id="pavatar" type="file" accept="image/png,image/jpeg,image/webp"></div>
+    <div class="field"><label for="pavatar">Profile picture</label><input id="pavatar" type="file" accept="image/*">
+      <div class="pick-preview" id="pavatar-preview"></div></div>
     <div class="field"><label for="notes">Notes for Abner</label><textarea id="notes" rows="3" maxlength="1000">${esc(c.notes)}</textarea>
       <p class="hint">Only Abner sees these.</p></div>
     <button class="btn btn-primary" type="submit">Save profile</button>
   </form>`;
+  previewOnPick(document.getElementById("pavatar"), document.getElementById("pavatar-preview"));
   watchForm(document.getElementById("profform"), async () => {
     const patch = { display_name: document.getElementById("pname").value.trim() || prof.display_name };
     const file = document.getElementById("pavatar").files[0];
     if (file) {
-      const ext = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" }[file.type];
-      if (!ext || file.size > 2 * 1024 * 1024) { toast("Use a PNG, JPG or WebP under 2 MB.", true); return false; }
-      const path = `${state.user.id}/avatar-${Date.now()}.${ext}`;
-      const { error: upErr } = await sb.storage.from("avatars").upload(path, file, { contentType: file.type });
+      let blob;
+      try { blob = await shrinkImage(file, 512, false); } catch (e) { toast(e.message, true); return false; }
+      const path = `${state.user.id}/avatar-${Date.now()}.${IMG_EXT[blob.type]}`;
+      const { error: upErr } = await sb.storage.from("avatars").upload(path, blob, { contentType: blob.type });
       if (upErr) { fail(upErr); return false; }
       if (prof.avatar_path) await sb.storage.from("avatars").remove([prof.avatar_path]);
       patch.avatar_path = path;
@@ -764,7 +805,8 @@ async function viewMeCharacter() {
     <div class="card stack"><h2 class="card-title">Style</h2>
       <div class="field"><label for="looknote">Describe your character</label><textarea id="looknote" rows="5" maxlength="2000" placeholder="Describe your character in detail: hair, eyes, outfit, colors, accessories…">${esc(c.look_note)}</textarea></div>
       <div class="look-preview">${lookUrl ? `<img src="${esc(lookUrl)}" alt="Your reference image">` : ""}</div>
-      <div class="field"><label for="lookfile">Reference image for Abner (optional, PNG, JPG or WebP, max 5 MB)</label><input id="lookfile" type="file" accept="image/png,image/jpeg,image/webp">
+      <div class="field"><label for="lookfile">Reference image for Abner (optional)</label><input id="lookfile" type="file" accept="image/*">
+        <div class="pick-preview" id="lookfile-preview"></div>
         <p class="hint">If you have a picture of how they should look, send it here.</p></div>
     </div>
     <button class="btn btn-primary" type="submit">Save character</button>
@@ -776,6 +818,7 @@ async function viewMeCharacter() {
       <p class="hint">Open a role for its story, title and battle lines. Teams are in the Teams tab.</p>`
       : `<p class="muted">No role yet.</p><a class="btn btn-gold" href="#/roles">Pick a role</a>`}
   </div>`;
+  previewOnPick(document.getElementById("lookfile"), document.getElementById("lookfile-preview"));
   watchForm(document.getElementById("charform"), async () => {
     const look = await uploadLook(document.getElementById("lookfile"));
     if (look === false) return false;
@@ -1200,7 +1243,19 @@ window.addEventListener("hashchange", route);
 // Events are queued and handled one at a time, so a second event never routes before the
 // first one has finished loading the profile.
 let authQueue = Promise.resolve();
+// Small local log of login events, shown on the login screen after a surprise logout,
+// so a screenshot tells us what happened. If it's missing, the phone wiped the site's storage.
+function authLog(entry) {
+  try {
+    const log = JSON.parse(localStorage.getItem("elg-authlog") || "[]");
+    log.push({ t: new Date().toISOString(), ...entry });
+    localStorage.setItem("elg-authlog", JSON.stringify(log.slice(-12)));
+  } catch (e) {}
+}
+document.addEventListener("visibilitychange", () => authLog({ event: "page " + document.visibilityState, user: !!state.user }));
+window.addEventListener("pageshow", e => authLog({ event: e.persisted ? "page restored" : "page loaded", user: !!state.user }));
 sb.auth.onAuthStateChange((event, session) => {
+  authLog({ event, user: !!session, exp: session?.expires_at || null });
   setTimeout(() => { authQueue = authQueue.then(() => handleAuth(event, session)).catch(e => fail(e)); }, 0);
 });
 async function handleAuth(event, session) {
@@ -1212,4 +1267,12 @@ async function handleAuth(event, session) {
     state.profile = user ? await loadProfile() : null;
   }
   if (event === "INITIAL_SESSION" || event === "SIGNED_IN" || event === "SIGNED_OUT" || event === "PASSWORD_RECOVERY") route();
+}
+function authLogHtml() {
+  let log = [];
+  try { log = JSON.parse(localStorage.getItem("elg-authlog") || "[]"); } catch (e) {}
+  if (!log.some(l => l.user)) return "";   // never logged in here (or storage was wiped): nothing to show
+  return `<details class="auth-log"><summary>Logged out by surprise? Tap here and send Abner a screenshot</summary>
+    <ol>${log.map(l => `<li>${esc(new Date(l.t).toLocaleString())}: ${esc(l.event)}${l.user ? " (logged in)" : ""}</li>`).join("")}</ol>
+    <p class="hint">${esc(navigator.userAgent)} · storage ${(() => { try { localStorage.setItem("elg-t", "1"); localStorage.removeItem("elg-t"); return "ok"; } catch (e) { return "blocked"; } })()}</p></details>`;
 }
