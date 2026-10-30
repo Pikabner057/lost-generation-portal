@@ -5,6 +5,7 @@ import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js
 import { SPECIES } from "./species.js";
 import { ITEMS } from "./items.js";
 import { ABILITIES, MOVES } from "./pokedata.js";
+import { spriteUrl } from "./sprites.js";
 
 const SUPABASE_URL = "https://ejworaccnktuzlevzydn.supabase.co";
 const SUPABASE_KEY = "sb_publishable_Xm5oe0vRFaizEggFh_gFEQ_a1p5TdYe"; // public by design
@@ -17,7 +18,7 @@ const GIMMICKS = ["None", "Mega", "Z-Move", "Dynamax", "Tera"];
 const MAX_ROLES = 2;
 const SPECIES_SET = new Set(SPECIES), ITEMS_SET = new Set(ITEMS), MOVES_SET = new Set(MOVES);
 const app = document.getElementById("app");
-const state = { user: null, profile: null };
+const state = { user: null, profile: null, dirty: false };
 
 // ---------- helpers ----------
 function esc(s) {
@@ -27,8 +28,17 @@ function toast(msg, isError = false) {
   const el = document.createElement("div");
   el.className = "toast" + (isError ? " error" : "");
   el.textContent = msg;
-  document.getElementById("toasts").appendChild(el);
-  setTimeout(() => el.remove(), 4500);
+  if (isError) {
+    // Errors stay until closed, so there's time to read them and find the field
+    el.setAttribute("role", "alert");
+    const x = document.createElement("button");
+    x.type = "button"; x.className = "toast-close"; x.textContent = "Close";
+    x.onclick = () => el.remove();
+    el.append(" ", x);
+  } else setTimeout(() => el.remove(), 4500);
+  // Above an open dialog (top layer) when there is one
+  const sheet = document.getElementById("sheet");
+  (sheet?.open ? sheet : document.body).appendChild(document.getElementById("toasts")).appendChild(el);
 }
 function fail(error, fallback) {
   const msg = error?.message || fallback || "Something went wrong";
@@ -59,6 +69,8 @@ function passwordProblem(pw) {
   if (!/[a-zA-Z]/.test(pw) || !/\d/.test(pw)) return "Use letters and numbers.";
   return null;
 }
+const STATUS_LABEL = { pending: "Needs review", approved: "Approved", rejected: "Not approved" };
+function statusBadge(st) { return `<span class="badge badge-${esc(st)}">${esc(STATUS_LABEL[st] || st)}</span>`; }
 function typeChip(t) { return t ? `<span class="type-chip" data-type="${esc(t)}">${esc(t)}</span>` : ""; }
 function names(profiles) { return Object.fromEntries((profiles || []).map(p => [p.id, p.display_name || "Someone"])); }
 
@@ -75,7 +87,10 @@ function toggleTheme() {
   document.documentElement.dataset.theme = next;
   try { localStorage.setItem("elg-theme", next); } catch (e) {}
   applyThemeLabel();
+  document.querySelector('meta[name="theme-color"]')?.setAttribute("content", next === "light" ? "#F5FAF6" : "#08130F");
 }
+// The skip link can't use its #app hash (the router owns the hash), so it just moves focus
+document.getElementById("skip").onclick = e => { e.preventDefault(); app.focus(); };
 document.getElementById("theme-toggle").onclick = toggleTheme;
 document.getElementById("theme-toggle-auth").onclick = toggleTheme;
 applyThemeLabel();
@@ -86,7 +101,11 @@ function showShell(signedIn) {
   document.getElementById("theme-toggle-auth").hidden = signedIn;
   document.getElementById("nav-admin").hidden = !state.profile?.is_admin;
 }
-document.getElementById("logout").onclick = async () => { await sb.auth.signOut(); location.hash = ""; };
+document.getElementById("logout").onclick = async () => {
+  if (state.dirty && !confirm("You have unsaved changes. Log out without saving?")) return;
+  state.dirty = false;
+  await sb.auth.signOut(); location.hash = "";
+};
 
 async function loadProfile() {
   const { data, error } = await sb.from("profiles").select("*").eq("id", state.user.id).single();
@@ -181,7 +200,7 @@ function viewSetPassword(firstTime) {
     <h1 class="page-title">${firstTime ? "Welcome to the crew" : "Set a new password"}</h1>
     <p class="muted">${firstTime ? "Pick your own password and the name the group will see." : "Choose a new password."}</p>
     <form id="setpw" class="stack">
-      ${firstTime ? `<div class="field"><label for="dname">Display name</label><input id="dname" maxlength="24" required value="${esc(state.profile?.display_name)}"></div>` : ""}
+      ${firstTime ? `<div class="field"><label for="dname">Display name</label><input id="dname" maxlength="24" autocomplete="nickname" required value="${esc(state.profile?.display_name)}"></div>` : ""}
       <div class="field"><label for="pw1">New password</label><input id="pw1" type="password" autocomplete="new-password" required>
         <p class="hint">At least 10 characters, letters and numbers.</p></div>
       <div class="field"><label for="pw2">Repeat it</label><input id="pw2" type="password" autocomplete="new-password" required></div>
@@ -222,7 +241,7 @@ async function viewHome() {
   <h1 class="page-title">Hey ${esc(state.profile.display_name)}!</h1>
   <div class="grid">
     <div class="card stack"><h2 class="card-title">Your role${mine.length > 1 ? "s" : ""}</h2>
-      ${mine.length ? mine.map(c => `<p>${esc(roleLabel[c.role_id])} ${typeChip(c.poke_type)} <span class="badge badge-${c.status}">${c.status}</span></p>`).join("")
+      ${mine.length ? mine.map(c => `<p>${esc(roleLabel[c.role_id])} ${typeChip(c.poke_type)} ${statusBadge(c.status)}</p>`).join("")
                     : `<p class="muted">No role yet.</p><a class="btn btn-gold" href="#/roles">Pick a role</a>`}
     </div>
     <div class="card stack"><h2 class="card-title">The crew</h2>
@@ -299,7 +318,7 @@ async function viewRoles() {
       <button class="btn btn-gold" type="submit" ${canClaim ? "" : "disabled"}>Send request</button>
       ${canClaim ? "" : `<p class="hint">You already hold 2 roles.</p>`}
       ${(requests || []).length ? `<ul class="request-list">${requests.map(q => `<li class="request-item">
-        <b>${esc(q.role_name)}</b> <span class="badge badge-${q.status}">${q.status}</span>
+        <b>${esc(q.role_name)}</b> ${statusBadge(q.status)}
         <p class="request-reason muted">${esc(q.reason)}</p><p class="meta-date">${esc(fmtDateTime(q.created_at))}</p>
         ${q.status === "pending" ? `<button class="btn btn-ghost btn-small" type="button" data-unrequest="${q.id}">Cancel request</button>` : ""}
       </li>`).join("")}</ul>` : ""}
@@ -346,6 +365,7 @@ function characterDetails(s, imgUrl, roleLabel = {}) {
   const perRole = Object.entries(s.roles || {}).map(([k, r]) => {
     const d = r.dialogue || {};
     return `<div class="role-entry stack"><h3 class="card-title">${esc(roleLabel[k] || k)}${r.title ? `: ${esc(r.title)}` : ""}</h3>
+      ${r.story ? `<p><b>Story:</b> ${esc(r.story)}</p>` : ""}
       ${r.signature_move?.name ? `<p><b>Signature move:</b> ${esc(r.signature_move.name)}${r.signature_move.description ? `: ${esc(r.signature_move.description)}` : ""}</p>` : ""}
       <p><b>First battle:</b> ${teamSummary(r.first_team)}</p>
       <p><b>Rematch:</b> ${teamSummary(r.rematch_team)}</p>
@@ -356,13 +376,16 @@ function characterDetails(s, imgUrl, roleLabel = {}) {
   return `
     ${imgUrl ? `<div class="look-preview"><img src="${esc(imgUrl)}" alt="Look reference"></div>` : ""}
     <p><b>Character:</b> ${esc(s.character_name || "—")}</p>
-    <p><b>Look:</b> ${esc(s.look_note || "—")}</p>
+    <p><b>Backstory:</b> ${esc(s.backstory || "—")}</p>
+    <p><b>Personality:</b> ${esc(s.personality || "—")}</p>
+    <p><b>Style:</b> ${esc(s.look_note || "—")}</p>
     ${perRole || `<p><b>Team (old format):</b> ${teamSummary(s.team)}</p>`}
     <p><b>Notes:</b> ${esc(s.notes || "—")}</p>`;
 }
 async function openSubmission(userId, name) {
   const sheet = document.getElementById("sheet");
   sheet.innerHTML = `<p class="loading">Loading…</p>`;
+  sheet.setAttribute("aria-labelledby", "sheet-title");
   if (!sheet.open) sheet.showModal();
   const [{ data: history, error }, { data: prof }, { data: roles }] = await Promise.all([
     sb.from("character_history").select("*").eq("user_id", userId).order("created_at", { ascending: false }),
@@ -373,7 +396,7 @@ async function openSubmission(userId, name) {
   if (error) { sheet.close(); return fail(error); }
   const urls = await signedUrls("looks", (history || []).map(h => h.snapshot.look_image));
   sheet.innerHTML = `
-    <div class="panel-head"><h2 class="card-title">${esc(name)}’s submission</h2>
+    <div class="panel-head"><h2 class="card-title" id="sheet-title">${esc(name)}’s submission</h2>
       <button class="btn btn-ghost btn-small panel-close" type="button" id="sheet-close">Close</button></div>
     ${!history?.length ? `<p class="muted">${esc(name)} hasn’t filled in a character yet.</p>` : `
     <ol class="history">
@@ -398,95 +421,148 @@ async function openSubmission(userId, name) {
     openSubmission(userId, name);
   });
 }
-document.getElementById("sheet").addEventListener("click", e => { if (e.target.id === "sheet") e.target.close(); });
+// Close on backdrop taps only (a tap on the dialog's own padding also targets #sheet)
+document.getElementById("sheet").addEventListener("click", e => {
+  if (e.target.id !== "sheet") return;
+  const r = e.target.getBoundingClientRect();
+  if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) e.target.close();
+});
 
-// ---------- crew profiles ----------
+// ---------- trainer card (My Character profile tab + Crew) ----------
+const ROLE_ABOUT = {
+  gym: "A Gym Leader: a type specialist who guards one of Hoenn's badges. Every trainer has to beat you to move on.",
+  elite4: "A member of the Elite Four: one of the strongest trainers in Hoenn, waiting at the end of Victory Road.",
+  aqua: "Part of Team Aqua's leadership. You shape what the team does and how far it's willing to go.",
+  magma: "Part of Team Magma's leadership. You shape what the team does and how far it's willing to go.",
+  professor: "The region's Pokémon professor: the one who hands new trainers their first partner.",
+  champion: "The Champion: the last battle of the main story.",
+  custom: "A role made for you from your own idea.",
+};
+function roleAbout(role) { return role?.description || ROLE_ABOUT[role?.category] || ""; }
+// A stable, fun ID number for the card footer
+function trainerNo(id) {
+  let h = 0;
+  for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) % 10000;
+  return String(h).padStart(4, "0");
+}
+function spriteImg(species, cls = "poke-sprite", size = 56) {
+  const url = spriteUrl(species);
+  return url ? `<img class="${cls}" src="${esc(url)}" width="${size}" height="${size}" alt="" loading="lazy">`
+             : `<span class="${cls} is-empty" aria-hidden="true"></span>`;
+}
+function teamStripHtml(team) {
+  const mons = (team || []).filter(m => m.species);
+  if (!mons.length) return "";
+  return `<div class="team-strip" translate="no">${mons.map(m => `<span class="team-strip-mon">${spriteImg(m.species, "poke-sprite", 40)}<span>${esc(m.nickname || m.species)}</span></span>`).join("")}</div>`;
+}
+// card: { userId, name, player, title, roles: [{label, type}], art, avatar, team, compact }
+function trainerCardHtml(card) {
+  const type = card.roles.find(r => r.type)?.type;
+  const initial = esc((card.name || card.player || "?").trim().slice(0, 1).toUpperCase());
+  const art = card.art || card.avatar;
+  return `<article class="trainer-card${card.compact ? " is-compact" : ""}"${type ? ` data-type="${esc(type)}"` : ""}>
+    <div class="trainer-card-art">${art ? `<img src="${esc(art)}" alt="${esc(card.name || card.player)}">`
+                                        : `<span class="trainer-card-placeholder" aria-hidden="true">${initial}</span>`}</div>
+    <div class="trainer-card-body">
+      ${card.title ? `<p class="trainer-card-title">${esc(card.title)}</p>` : ""}
+      <h2 class="trainer-card-name">${esc(card.name || "No name yet")}</h2>
+      <p class="trainer-card-player">Player: ${esc(card.player)}</p>
+      ${card.roles.length ? `<ul class="trainer-card-roles" translate="no">${card.roles.map(r => `<li>${esc(r.label)} ${typeChip(r.type)}</li>`).join("")}</ul>`
+                          : `<p class="muted">No role yet</p>`}
+      ${card.compact ? "" : teamStripHtml(card.team)}
+    </div>
+    <p class="trainer-card-id">ELG No. ${trainerNo(card.userId)}</p>
+  </article>`;
+}
+
+// ---------- crew ----------
 async function viewProfiles() {
   const [{ data: profiles }, { data: claims }, { data: roles }] = await Promise.all([
     sb.from("profiles").select("id,display_name,avatar_path,approved_titles,approved_character_name").order("display_name"),
-    sb.from("claims").select("user_id,role_id,poke_type,status").neq("status", "rejected"),
+    sb.from("claims").select("user_id,role_id,poke_type,status,created_at").neq("status", "rejected").order("created_at"),
     sb.from("roles").select("id,label"),
   ]);
   const roleLabel = Object.fromEntries((roles || []).map(r => [r.id, r.label]));
   const claimsOf = {};
   (claims || []).forEach(c => (claimsOf[c.user_id] ||= []).push(c));
-  const urls = await signedUrls("avatars", (profiles || []).map(p => p.avatar_path));
+  const crew = await Promise.all((profiles || []).map(p => sb.rpc("crew_character", { p_user: p.id }).then(r => r.data)));
+  const [avatarUrls, lookUrls] = await Promise.all([
+    signedUrls("avatars", (profiles || []).map(p => p.avatar_path)),
+    signedUrls("looks", crew.map(c => c?.look_image)),
+  ]);
   app.innerHTML = `
     <h1 class="page-title">The Crew</h1>
     <div class="profile-grid">
-      ${(profiles || []).map(p => {
-        const cs = claimsOf[p.id] || [];
-        const titles = p.approved_titles || {};
-        return `<a class="profile-card card" href="#/profile/${p.id}">
-          ${avatarHtml(p, urls[p.avatar_path])}
-          <p class="profile-name">${esc(p.display_name)}</p>
-          ${p.approved_character_name ? `<p class="profile-character">${esc(p.approved_character_name)}</p>` : ""}
-          ${cs.length ? cs.map(c => `<p class="muted">${titles[c.role_id] ? `<span class="profile-title">${esc(titles[c.role_id])}</span> · ` : ""}${esc(roleLabel[c.role_id])} ${typeChip(c.poke_type)}</p>`).join("")
-                      : `<p class="muted">No role yet</p>`}
-        </a>`;
+      ${(profiles || []).map((p, i) => {
+        const cs = claimsOf[p.id] || [], c = crew[i], titles = p.approved_titles || {};
+        return `<a class="crew-link" href="#/profile/${p.id}">${trainerCardHtml({
+          userId: p.id, compact: true, player: p.display_name,
+          name: c?.character_name || p.approved_character_name,
+          title: titles[cs[0]?.role_id] || "",
+          roles: cs.map(x => ({ label: roleLabel[x.role_id] || x.role_id, type: x.poke_type })),
+          art: lookUrls[c?.look_image], avatar: avatarUrls[p.avatar_path],
+        })}</a>`;
       }).join("")}
     </div>`;
 }
 
+function storyBlock(title, text) {
+  return text ? `<section class="crew-story card stack"><h2 class="card-title">${esc(title)}</h2><p class="story-text">${esc(text)}</p></section>` : "";
+}
+
 async function viewProfile(id) {
-  const isMe = id === state.user.id;
-  const [{ data: p, error }, { data: claims }, { data: roles }] = await Promise.all([
+  const isMe = id === state.user.id, canSeeTeams = isMe || state.profile.is_admin;
+  const [{ data: p, error }, { data: claims }, { data: roles }, { data: c }] = await Promise.all([
     sb.from("profiles").select("id,display_name,avatar_path,approved_titles,approved_character_name,approved_at").eq("id", id).single(),
     sb.from("claims").select("role_id,poke_type,status").eq("user_id", id).neq("status", "rejected").order("created_at"),
-    sb.from("roles").select("id,label"),
+    sb.from("roles").select("*"),
+    sb.rpc("crew_character", { p_user: id }),
   ]);
   if (error) return fail(error);
-  const roleLabel = Object.fromEntries((roles || []).map(r => [r.id, r.label]));
-  const urls = await signedUrls("avatars", [p.avatar_path]);
+  const roleById = Object.fromEntries((roles || []).map(r => [r.id, r]));
   // Teams are private: only the owner and the admin can read characters (enforced by RLS)
   let ch = null;
-  if (isMe || state.profile.is_admin) ({ data: ch } = await sb.from("characters").select("roles").eq("user_id", id).maybeSingle());
+  if (canSeeTeams) ({ data: ch } = await sb.from("characters").select("roles").eq("user_id", id).maybeSingle());
+  const [avatarUrls, lookUrls] = await Promise.all([signedUrls("avatars", [p.avatar_path]), signedUrls("looks", [c?.look_image])]);
   const titles = p.approved_titles || {};
+  const cr = c?.roles || {};
+  const firstRole = (claims || [])[0]?.role_id;
   app.innerHTML = `
-    <p><a href="#/profile" class="btn btn-ghost btn-small">← The Crew</a></p>
-    <div class="profile-card card">
-      ${avatarHtml(p, urls[p.avatar_path], true)}
-      <h1 class="profile-name page-title">${esc(p.display_name)}</h1>
-      ${p.approved_character_name ? `<p class="profile-character">${esc(p.approved_character_name)}</p>` : `<p class="muted">Character not approved yet</p>`}
-      ${(claims || []).length ? claims.map(c => `<p>${titles[c.role_id] ? `<span class="profile-title">${esc(titles[c.role_id])}</span><br>` : ""}${esc(roleLabel[c.role_id])} ${typeChip(c.poke_type)} <span class="badge badge-${c.status}">${c.status === "approved" ? "Taken" : "Pending"}</span></p>`).join("")
-                              : `<p class="muted">No role yet</p>`}
-    </div>
-    ${isMe || state.profile.is_admin ? `
+    <p><a href="#/profile" class="back-link">‹ The Crew</a></p>
+    ${trainerCardHtml({
+      userId: p.id, player: p.display_name,
+      name: c?.character_name || p.approved_character_name,
+      title: titles[firstRole] || cr[firstRole]?.title || "",
+      roles: (claims || []).map(x => ({ label: roleById[x.role_id]?.label || x.role_id, type: x.poke_type })),
+      art: lookUrls[c?.look_image], avatar: avatarUrls[p.avatar_path],
+      team: canSeeTeams ? (ch?.roles?.[firstRole]?.rematch_team || []) : null,
+    })}
+    ${isMe ? `<p><a class="btn btn-ghost btn-small" href="#/me/profile">Edit my profile</a></p>` : ""}
+    ${c ? `${storyBlock("Backstory", c.backstory)}${storyBlock("Personality", c.personality)}${storyBlock("Style", c.look_note)}
+      ${(claims || []).map(x => {
+        const r = cr[x.role_id] || {}, d = r.dialogue || {}, role = roleById[x.role_id];
+        const lines = [d.intro && `<p><b>Before the battle:</b> “${esc(d.intro)}”</p>`, d.defeat && `<p><b>When they lose:</b> “${esc(d.defeat)}”</p>`,
+          ...(d.extra || []).map(l => `<p>“${esc(l)}”</p>`)].filter(Boolean).join("");
+        if (!r.title && !r.story && !lines && !r.signature_move?.name) return "";
+        return `<section class="crew-story card stack">
+          <h2 class="card-title">${esc(role?.label || x.role_id)} ${typeChip(x.poke_type)}</h2>
+          ${r.title ? `<p class="profile-title">${esc(r.title)}</p>` : ""}
+          ${r.story ? `<p class="story-text">${esc(r.story)}</p>` : ""}
+          ${r.signature_move?.name ? `<p><b>Signature move:</b> ${esc(r.signature_move.name)}${r.signature_move.description ? `: ${esc(r.signature_move.description)}` : ""}</p>` : ""}
+          ${lines}
+        </section>`;
+      }).join("")}`
+      : `<p class="muted">${esc(p.display_name)}’s character shows up here once Abner approves it.</p>`}
+    ${canSeeTeams ? `
     <div class="profile-private card stack">
       <p class="private-note">Only ${isMe ? "you" : esc(p.display_name)} and Abner can see this</p>
       <h2 class="card-title">Teams</h2>
-      ${Object.keys(ch?.roles || {}).length ? Object.entries(ch.roles).map(([k, r]) => `<div class="stack"><h3 class="team-section-title">${esc(roleLabel[k] || k)}</h3>
-        <p><b>First battle:</b> ${teamSummary(r.first_team)}</p><p><b>Rematch:</b> ${teamSummary(r.rematch_team)}</p></div>`).join("")
+      ${Object.keys(ch?.roles || {}).length ? Object.entries(ch.roles).map(([k, r]) => `<div class="stack"><h3 class="team-section-title">${esc(roleById[k]?.label || k)}</h3>
+        <p><b>First battle</b></p>${teamStripHtml(r.first_team) || `<p class="muted">Empty</p>`}
+        <p><b>Rematch</b></p>${teamStripHtml(r.rematch_team) || `<p class="muted">Empty</p>`}
+        <details><summary>Full details</summary><p>${teamSummary(r.first_team)}</p><p>${teamSummary(r.rematch_team)}</p></details></div>`).join("")
         : `<p class="muted">No teams yet.</p>`}
-    </div>` : ""}
-    ${isMe ? `
-    <form id="profedit" class="card stack"><h2 class="card-title">Edit my profile</h2>
-      <div class="field"><label for="pname">Username</label><input id="pname" maxlength="24" value="${esc(p.display_name)}"></div>
-      <div class="field"><label for="pavatar">Profile picture (PNG, JPG or WebP, max 2 MB)</label><input id="pavatar" type="file" accept="image/png,image/jpeg,image/webp"></div>
-      <button class="btn btn-primary" type="submit">Save profile</button>
-    </form>` : ""}`;
-
-  if (!isMe) return;
-  document.getElementById("profedit").onsubmit = async e => {
-    e.preventDefault();
-    const btn = e.submitter; btn.disabled = true;
-    const patch = { display_name: document.getElementById("pname").value.trim() || p.display_name };
-    const file = document.getElementById("pavatar").files[0];
-    if (file) {
-      const ext = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" }[file.type];
-      if (!ext || file.size > 2 * 1024 * 1024) { btn.disabled = false; return toast("Use a PNG, JPG or WebP under 2 MB.", true); }
-      const path = `${state.user.id}/avatar-${Date.now()}.${ext}`;
-      const { error: upErr } = await sb.storage.from("avatars").upload(path, file, { contentType: file.type });
-      if (upErr) { btn.disabled = false; return fail(upErr); }
-      if (p.avatar_path) await sb.storage.from("avatars").remove([p.avatar_path]);
-      patch.avatar_path = path;
-    }
-    const { error: e2 } = await sb.from("profiles").update(patch).eq("id", state.user.id);
-    btn.disabled = false;
-    if (e2) return fail(e2);
-    state.profile = { ...state.profile, ...patch };
-    toast("Profile saved."); viewProfile(id);
-  };
+    </div>` : ""}`;
 }
 
 // ===== TEAM BUILDER (shared by My Character) =====
@@ -499,18 +575,18 @@ function pokeSlotHtml(key, i, m) {
   const id = `${key}-${i}`;
   const g = m.gimmick || "None";
   return `<div class="poke-slot stack">
-    <span class="poke-slot-num">${i + 1}</span>
-    <div class="field"><label for="sp-${id}">Pokémon</label><input id="sp-${id}" list="species" value="${esc(m.species)}" autocomplete="off" data-species-for="${id}"></div>
-    <div class="field"><label for="nn-${id}">Nickname</label><input id="nn-${id}" maxlength="12" value="${esc(m.nickname)}"></div>
-    <div class="field"><label for="it-${id}">Held item</label><input id="it-${id}" list="items" value="${esc(m.item)}" autocomplete="off"></div>
+    <div class="poke-slot-head">${spriteImg(m.species).replace(/^<(img|span) /, `<$1 id="spr-${id}" `)}<span class="poke-slot-num">${i + 1}</span></div>
+    <div class="field"><label for="sp-${id}">Pokémon</label><input id="sp-${id}" list="species" value="${esc(m.species)}" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off" data-species-for="${id}"></div>
+    <div class="field"><label for="nn-${id}">Nickname</label><input id="nn-${id}" maxlength="12" value="${esc(m.nickname)}" autocomplete="off" spellcheck="false"></div>
+    <div class="field"><label for="it-${id}">Held item</label><input id="it-${id}" list="items" value="${esc(m.item)}" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off"></div>
     <div class="field"><label for="ab-${id}">Ability</label><select id="ab-${id}" data-ability-for="${id}">${abilityOptions(m.species, m.ability)}</select></div>
     <div class="moves-grid">${[0, 1, 2, 3].map(j => `<div class="field"><label for="mv-${id}-${j}">Move ${j + 1}</label>
-      <input id="mv-${id}-${j}" list="moves" value="${esc((m.moves || [])[j])}" autocomplete="off"></div>`).join("")}</div>
+      <input id="mv-${id}-${j}" list="moves" value="${esc((m.moves || [])[j])}" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off"></div>`).join("")}</div>
     <div class="field"><label for="gm-${id}">Gimmick</label><select id="gm-${id}" data-gimmick="${id}">
       ${GIMMICKS.map(x => `<option${x === g ? " selected" : ""}>${x}</option>`).join("")}</select></div>
     <div class="field tera-field" id="tf-${id}" ${g === "Tera" ? "" : "hidden"}><label for="tt-${id}">Tera type</label><select id="tt-${id}">
       <option value="">Pick…</option>${TERA_TYPES.map(t => `<option${t === m.tera ? " selected" : ""}>${t}</option>`).join("")}</select></div>
-    <div class="field"><label for="no-${id}">Note (strategy, EVs, nature…)</label><input id="no-${id}" maxlength="120" value="${esc(m.note)}"></div>
+    <div class="field"><label for="no-${id}">Note (strategy, EVs, nature…)</label><input id="no-${id}" maxlength="120" value="${esc(m.note)}" autocomplete="off"></div>
   </div>`;
 }
 function readTeam(key, size) {
@@ -553,39 +629,228 @@ async function signedLook(path) {
   const { data } = await sb.storage.from("looks").createSignedUrl(path, 3600);
   return data?.signedUrl || null;
 }
-async function viewMe() {
+
+// Unsaved-changes guard: forms call watchForm(); route() asks before leaving.
+function watchForm(form, onSave) {
+  state.dirty = false;
+  const bar = document.createElement("div");
+  bar.className = "unsaved-bar"; bar.setAttribute("role", "status"); bar.hidden = true;
+  bar.innerHTML = `You have unsaved changes <button class="btn btn-primary btn-small" type="button">Save</button>`;
+  bar.querySelector("button").onclick = () => form.requestSubmit();
+  form.after(bar);
+  const mark = () => { state.dirty = true; bar.hidden = false; };
+  form.addEventListener("input", mark);
+  form.addEventListener("change", mark);
+  form.onsubmit = async e => {
+    e.preventDefault();
+    const btn = form.querySelector('button[type="submit"]');
+    const barBtn = bar.querySelector("button");
+    btn.disabled = barBtn.disabled = true; btn.dataset.label ||= btn.textContent; btn.textContent = "Saving…";
+    try {
+      if (await onSave() !== false) { state.dirty = false; toast("Saved!"); route(); }
+    } catch (err) { fail(err); }
+    finally { btn.disabled = barBtn.disabled = false; btn.textContent = btn.dataset.label; }
+  };
+}
+window.addEventListener("beforeunload", e => { if (state.dirty) { e.preventDefault(); e.returnValue = ""; } });
+
+async function loadMe() {
   const [{ data: ch }, { data: claims }, { data: roles }] = await Promise.all([
     sb.from("characters").select("*").eq("user_id", state.user.id).maybeSingle(),
     sb.from("claims").select("*").eq("user_id", state.user.id).neq("status", "rejected").order("created_at"),
     sb.from("roles").select("*"),
   ]);
-  const c = ch || { character_name: "", look_note: "", look_image: null, notes: "", roles: {} };
+  const c = ch || { character_name: "", look_note: "", look_image: null, notes: "", backstory: "", personality: "", roles: {} };
   const roleById = Object.fromEntries((roles || []).map(r => [r.id, r]));
+  const myRoles = (claims || []).filter(cl => roleById[cl.role_id])
+    .map(cl => ({ claim: cl, role: roleById[cl.role_id], data: (c.roles || {})[cl.role_id] || {} }));
+  return { ch, c, myRoles };
+}
+// Saves the whole character row; `patch` replaces only what one tab edits.
+async function saveCharacter(c, myRoles, patch) {
+  const roles = {};
+  for (const { role, data } of myRoles) roles[role.id] = { ...data, ...(patch.roles?.[role.id] || {}) };
+  const { error } = await sb.from("characters").upsert({
+    user_id: state.user.id,
+    character_name: c.character_name, look_note: c.look_note, look_image: c.look_image, notes: c.notes,
+    backstory: c.backstory || "", personality: c.personality || "",
+    ...patch, roles,
+  });
+  if (error) { fail(error); return false; }
+}
+async function uploadLook(input) {
+  const file = input.files[0];
+  if (!file) return undefined;
+  if (file.size > 5 * 1024 * 1024) { toast("Image is over 5 MB.", true); return false; }
+  const ext = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" }[file.type];
+  if (!ext) { toast("Use PNG, JPG or WebP.", true); return false; }
+  const path = `${state.user.id}/look-${Date.now()}.${ext}`;
+  const { error } = await sb.storage.from("looks").upload(path, file, { contentType: file.type });
+  if (error) { fail(error); return false; }
+  return path; // old images are kept so the version history still shows them
+}
+
+function meTabs(active) {
+  const tab = (id, label) => `<a class="subtab" href="#/me/${id}"${active === id ? ` aria-current="page"` : ""}>${label}</a>`;
+  return `<h1 class="page-title">My Character</h1>
+    <nav class="subtabs" aria-label="My Character sections">${tab("profile", "Profile")}${tab("character", "Character")}${tab("teams", "Teams")}</nav>`;
+}
+
+async function viewMe(tab = "profile", sub) {
+  if (tab === "role") return viewMeRole(sub);
+  if (tab === "character") return viewMeCharacter();
+  if (tab === "teams") return viewMeTeams();
+  return viewMeProfile();
+}
+
+async function viewMeProfile() {
+  const { ch, c, myRoles } = await loadMe();
   const prof = state.profile;
   const changedSinceApproval = prof.approved_at && ch && new Date(ch.updated_at) > new Date(prof.approved_at);
-  const approvalHtml = prof.approved_at
-    ? `<p><span class="approved-mark">Approved ${esc(fmtDate(prof.approved_at))}</span> ${esc(prof.approved_character_name || "")}</p>
-       ${changedSinceApproval ? `<p class="hint">You changed things since then. Abner will review the new version.</p>` : ""}`
-    : `<p class="muted">Not approved yet. Abner reviews every version you save.</p>`;
-  const lookUrl = await signedLook(c.look_image);
-  const myRoles = (claims || []).map(cl => ({ claim: cl, role: roleById[cl.role_id], data: (c.roles || {})[cl.role_id] || {} }));
+  const [lookUrl, avatarUrls] = await Promise.all([signedLook(c.look_image), signedUrls("avatars", [prof.avatar_path])]);
+  const first = myRoles[0];
+  app.innerHTML = `${meTabs("profile")}
+  ${trainerCardHtml({
+    userId: state.user.id, player: prof.display_name, name: c.character_name,
+    title: first?.data.title || "", art: lookUrl, avatar: avatarUrls[prof.avatar_path],
+    roles: myRoles.map(({ claim, role }) => ({ label: role.label, type: claim.poke_type })),
+    team: first?.data.rematch_team?.length ? first.data.rematch_team : first?.data.first_team,
+  })}
+  <div class="card stack"><h2 class="card-title">Approval</h2>
+    ${prof.approved_at
+      ? `<p><span class="approved-mark">Approved ${esc(fmtDate(prof.approved_at))}</span> ${esc(prof.approved_character_name || "")}</p>
+         ${changedSinceApproval ? `<p class="hint">You changed things since then. Abner will review the new version.</p>` : ""}`
+      : `<p class="muted">Not approved yet. Abner reviews every version you save. Your character shows up for the crew once it’s approved.</p>`}
+    ${ch ? `<p class="meta-date">Last saved ${esc(fmtDateTime(ch.updated_at))}</p>` : ""}
+  </div>
+  <form id="profform" class="card stack"><h2 class="card-title">Your profile</h2>
+    <div class="field"><label for="pname">Username</label><input id="pname" name="nickname" maxlength="24" autocomplete="nickname" spellcheck="false" value="${esc(prof.display_name)}"></div>
+    <div class="field"><label for="pavatar">Profile picture (PNG, JPG or WebP, max 2 MB)</label><input id="pavatar" type="file" accept="image/png,image/jpeg,image/webp"></div>
+    <div class="field"><label for="notes">Notes for Abner</label><textarea id="notes" rows="3" maxlength="1000">${esc(c.notes)}</textarea>
+      <p class="hint">Only Abner sees these.</p></div>
+    <button class="btn btn-primary" type="submit">Save profile</button>
+  </form>`;
+  watchForm(document.getElementById("profform"), async () => {
+    const patch = { display_name: document.getElementById("pname").value.trim() || prof.display_name };
+    const file = document.getElementById("pavatar").files[0];
+    if (file) {
+      const ext = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" }[file.type];
+      if (!ext || file.size > 2 * 1024 * 1024) { toast("Use a PNG, JPG or WebP under 2 MB.", true); return false; }
+      const path = `${state.user.id}/avatar-${Date.now()}.${ext}`;
+      const { error: upErr } = await sb.storage.from("avatars").upload(path, file, { contentType: file.type });
+      if (upErr) { fail(upErr); return false; }
+      if (prof.avatar_path) await sb.storage.from("avatars").remove([prof.avatar_path]);
+      patch.avatar_path = path;
+    }
+    const { error } = await sb.from("profiles").update(patch).eq("id", state.user.id);
+    if (error) { fail(error); return false; }
+    state.profile = { ...state.profile, ...patch };
+    const notes = document.getElementById("notes").value.trim();
+    if (notes !== c.notes) return saveCharacter(c, myRoles, { notes });
+  });
+}
 
-  const roleEntryHtml = ({ claim, role, data }) => {
-    const d = data.dialogue || {};
+async function viewMeCharacter() {
+  const { c, myRoles } = await loadMe();
+  const lookUrl = await signedLook(c.look_image);
+  app.innerHTML = `${meTabs("character")}
+  <form id="charform" class="stack">
+    <div class="card stack"><h2 class="card-title">Who are you in the game?</h2>
+      <div class="field"><label for="cname">Character name</label><input id="cname" maxlength="12" autocomplete="off" value="${esc(c.character_name)}">
+        <p class="hint">Same character in every role. GBA names fit 12 characters.</p></div>
+      <div class="field"><label for="backstory">Backstory</label><textarea id="backstory" rows="5" maxlength="3000" placeholder="Where they come from, what happened to them, why they battle…">${esc(c.backstory)}</textarea></div>
+      <div class="field"><label for="personality">Personality</label><textarea id="personality" rows="3" maxlength="1500" placeholder="Calm, cocky, kind, chaotic…">${esc(c.personality)}</textarea></div>
+    </div>
+    <div class="card stack"><h2 class="card-title">Style</h2>
+      <div class="field"><label for="looknote">Describe your character</label><textarea id="looknote" rows="5" maxlength="2000" placeholder="Describe your character in detail: hair, eyes, outfit, colors, accessories…">${esc(c.look_note)}</textarea></div>
+      <div class="look-preview">${lookUrl ? `<img src="${esc(lookUrl)}" alt="Your reference image">` : ""}</div>
+      <div class="field"><label for="lookfile">Reference image for Abner (optional, PNG, JPG or WebP, max 5 MB)</label><input id="lookfile" type="file" accept="image/png,image/jpeg,image/webp">
+        <p class="hint">If you have a picture of how they should look, send it here.</p></div>
+    </div>
+    <button class="btn btn-primary" type="submit">Save character</button>
+  </form>
+  <div class="card stack"><h2 class="card-title">My roles</h2>
+    ${myRoles.length ? `<div class="role-list">${myRoles.map(({ claim, role }) => `<a class="role-link" href="#/me/role/${esc(role.id)}">
+        <span class="role-link-label">${esc(role.label)}</span>${typeChip(claim.poke_type)}
+        ${statusBadge(claim.status)}<span class="role-link-chevron" aria-hidden="true">›</span></a>`).join("")}</div>
+      <p class="hint">Open a role for its story, title and battle lines. Teams are in the Teams tab.</p>`
+      : `<p class="muted">No role yet.</p><a class="btn btn-gold" href="#/roles">Pick a role</a>`}
+  </div>`;
+  watchForm(document.getElementById("charform"), async () => {
+    const look = await uploadLook(document.getElementById("lookfile"));
+    if (look === false) return false;
+    return saveCharacter(c, myRoles, {
+      character_name: document.getElementById("cname").value.trim(),
+      backstory: document.getElementById("backstory").value.trim(),
+      personality: document.getElementById("personality").value.trim(),
+      look_note: document.getElementById("looknote").value.trim(),
+      ...(look ? { look_image: look } : {}),
+    });
+  });
+}
+
+async function viewMeRole(roleId) {
+  const { c, myRoles } = await loadMe();
+  const entry = myRoles.find(x => x.role.id === roleId);
+  if (!entry) { location.hash = "#/me/character"; return; }
+  const { claim, role, data } = entry, d = data.dialogue || {}, k = role.id;
+  app.innerHTML = `${meTabs("character")}
+  <form id="roleform" class="role-detail card stack">
+    <a class="back-link" href="#/me/character">‹ Character</a>
+    <div class="role-entry-head"><h2 class="card-title">${esc(role.label)}</h2> ${typeChip(claim.poke_type)}
+      ${statusBadge(claim.status)}</div>
+    ${roleAbout(role) ? `<div class="role-desc"><strong>About this role</strong><p>${esc(roleAbout(role))}</p></div>` : ""}
+    <div class="field"><label for="title-${k}">Title for this role</label><input id="title-${k}" maxlength="24" autocomplete="off" value="${esc(data.title)}" placeholder="${claim.poke_type ? `The ${esc(claim.poke_type)} Master` : "Shadow Agent"}">
+      <p class="hint">Shown before your name, like a trainer class.</p></div>
+    <div class="field"><label for="story-${k}">Your story in this role</label><textarea id="story-${k}" rows="5" maxlength="3000" placeholder="How did you get this role? What do you want? How do you meet the player?">${esc(data.story)}</textarea></div>
+    ${role.category === "gym" ? `<div class="signature-move stack">
+      <h3 class="signature-title">Signature move</h3>
+      <p class="hint">Gym Leaders only. Pick a move or invent your own.</p>
+      <div class="field"><label for="sig-${k}">Move</label><input id="sig-${k}" list="moves" maxlength="40" value="${esc(data.signature_move?.name)}" autocomplete="off"></div>
+      <div class="field"><label for="sigd-${k}">What it does</label><textarea id="sigd-${k}" rows="2" maxlength="300">${esc(data.signature_move?.description)}</textarea></div>
+    </div>` : ""}
+    <h3 class="team-section-title">What you say in battle</h3>
+    <div class="field"><label for="di-${k}">Before the battle</label><textarea id="di-${k}" rows="2" maxlength="300">${esc(d.intro)}</textarea></div>
+    <div class="field"><label for="dd-${k}">When you lose</label><textarea id="dd-${k}" rows="2" maxlength="300">${esc(d.defeat)}</textarea></div>
+    <div class="field"><label for="dx-${k}">Extra lines (one per line)</label><textarea id="dx-${k}" rows="3" maxlength="800">${esc((d.extra || []).join("\n"))}</textarea></div>
+    <button class="btn btn-primary" type="submit">Save role</button>
+  </form>
+  ${role.category === "gym" ? `<datalist id="moves">${MOVES.map(s => `<option value="${esc(s)}">`).join("")}</datalist>` : ""}`;
+  watchForm(document.getElementById("roleform"), () => saveCharacter(c, myRoles, { roles: { [k]: {
+    title: document.getElementById(`title-${k}`).value.trim(),
+    story: document.getElementById(`story-${k}`).value.trim(),
+    ...(role.category === "gym" ? { signature_move: {
+      name: document.getElementById(`sig-${k}`).value.trim(),
+      description: document.getElementById(`sigd-${k}`).value.trim(),
+    } } : {}),
+    dialogue: {
+      intro: document.getElementById(`di-${k}`).value.trim(),
+      defeat: document.getElementById(`dd-${k}`).value.trim(),
+      extra: document.getElementById(`dx-${k}`).value.split("\n").map(s => s.trim()).filter(Boolean),
+    },
+  } } }));
+}
+
+// Find the team field a validation message is about, mark it and bring it into view
+function markBadField(msg) {
+  document.querySelectorAll("#teamform [aria-invalid]").forEach(el => el.removeAttribute("aria-invalid"));
+  const quoted = msg.match(/“(.+?)”/)?.[1], ability = msg.match(/can’t have (.+)\.$/)?.[1];
+  const want = quoted || ability;
+  if (!want) return;
+  const el = [...document.querySelectorAll("#teamform input, #teamform select")].find(x => x.value.trim() === want);
+  if (!el) return;
+  el.setAttribute("aria-invalid", "true");
+  el.scrollIntoView({ block: "center" });
+  el.focus({ preventScroll: true });
+}
+async function viewMeTeams() {
+  const { c, myRoles } = await loadMe();
+  const section = ({ claim, role, data }) => {
     const k = role.id;
     const first = Array.from({ length: role.first_team_size }, (_, i) => (data.first_team || [])[i] || {});
     const rematch = Array.from({ length: 6 }, (_, i) => (data.rematch_team || [])[i] || {});
     return `<section class="role-entry card stack">
-      <div class="role-entry-head"><h2 class="card-title">${esc(role.label)}</h2> ${typeChip(claim.poke_type)}
-        <span class="badge badge-${claim.status}">${claim.status}</span></div>
-      <div class="field"><label for="title-${k}">Title for this role</label><input id="title-${k}" maxlength="24" value="${esc(data.title)}" placeholder="${claim.poke_type ? `The ${esc(claim.poke_type)} Master` : "Shadow Agent"}">
-        <p class="hint">Shown before your name, like a trainer class.</p></div>
-      ${role.category === "gym" ? `<div class="signature-move stack">
-        <h3 class="signature-title">Signature move</h3>
-        <p class="hint">Gym Leaders only. Pick a move or invent your own.</p>
-        <div class="field"><label for="sig-${k}">Move</label><input id="sig-${k}" list="moves" maxlength="40" value="${esc(data.signature_move?.name)}" autocomplete="off"></div>
-        <div class="field"><label for="sigd-${k}">What it does</label><textarea id="sigd-${k}" rows="2" maxlength="300">${esc(data.signature_move?.description)}</textarea></div>
-      </div>` : ""}
+      <div class="role-entry-head"><h2 class="card-title">${esc(role.label)}</h2> ${typeChip(claim.poke_type)}</div>
       <div class="team-section first stack">
         <div class="team-section-head"><h3 class="team-section-title">First battle</h3>
           <span class="team-size-note">${role.first_team_size} Pokémon${claim.poke_type ? ` · ${esc(claim.poke_type)} specialist` : " · any type"}</span></div>
@@ -596,137 +861,93 @@ async function viewMe() {
           <span class="team-size-note">Full team of 6</span></div>
         <div class="team-grid">${rematch.map((m, i) => pokeSlotHtml(`${k}-r`, i, m)).join("")}</div>
       </div>
-      <div class="stack"><h3 class="team-section-title">What you say as ${esc(role.label)}</h3>
-        <div class="field"><label for="di-${k}">Before the battle</label><textarea id="di-${k}" rows="2" maxlength="300">${esc(d.intro)}</textarea></div>
-        <div class="field"><label for="dd-${k}">When you lose</label><textarea id="dd-${k}" rows="2" maxlength="300">${esc(d.defeat)}</textarea></div>
-        <div class="field"><label for="dx-${k}">Extra lines (one per line)</label><textarea id="dx-${k}" rows="3" maxlength="800">${esc((d.extra || []).join("\n"))}</textarea></div>
-      </div>
     </section>`;
   };
-
-  app.innerHTML = `
-  <h1 class="page-title">My Character</h1>
-  <p class="muted">Only you and Abner can see this page’s answers. Teams stay secret so nobody can prep against you.</p>
+  app.innerHTML = `${meTabs("teams")}
+  <p class="muted">Only you and Abner can see your teams, so nobody can prep against you.</p>
   <datalist id="species">${SPECIES.map(s => `<option value="${esc(s)}">`).join("")}</datalist>
   <datalist id="items">${ITEMS.map(s => `<option value="${esc(s)}">`).join("")}</datalist>
   <datalist id="moves">${MOVES.map(s => `<option value="${esc(s)}">`).join("")}</datalist>
-  <form id="char" class="stack">
-    <div class="card stack"><h2 class="card-title">Who are you in the game?</h2>
-      ${ch ? `<p class="meta-date">Last saved ${esc(fmtDateTime(ch.updated_at))}</p>` : ""}
-      ${approvalHtml}
-      <div class="field"><label for="cname">Character name</label><input id="cname" maxlength="12" value="${esc(c.character_name)}">
-        <p class="hint">Same character in every role. GBA names fit 12 characters.</p></div>
-    </div>
-    <div class="card stack"><h2 class="card-title">Your look</h2>
-      <div class="look-preview">${lookUrl ? `<img src="${esc(lookUrl)}" alt="Your look reference">` : `<p class="muted">No image yet.</p>`}</div>
-      <div class="field"><label for="lookfile">Reference image (PNG, JPG or WebP, max 5 MB)</label><input id="lookfile" type="file" accept="image/png,image/jpeg,image/webp"></div>
-      <div class="field"><label for="looknote">Describe it</label><textarea id="looknote" rows="3" maxlength="600">${esc(c.look_note)}</textarea></div>
-    </div>
-    ${myRoles.length ? myRoles.map(roleEntryHtml).join("")
-      : `<div class="card"><p class="muted">Claim a role first, then build its teams here.</p><a class="btn btn-gold" href="#/roles">Pick a role</a></div>`}
-    <div class="card stack"><h2 class="card-title">Anything else?</h2>
-      <div class="field"><label for="notes">Notes for Abner</label><textarea id="notes" rows="3" maxlength="1000">${esc(c.notes)}</textarea></div>
-    </div>
-    <button class="btn btn-primary" type="submit">Save my character</button>
-  </form>`;
-
-  app.querySelectorAll("[data-species-for]").forEach(inp => inp.onchange = () => {
-    const sel = document.getElementById(`ab-${inp.dataset.speciesFor}`);
-    sel.innerHTML = abilityOptions(inp.value.trim(), sel.value);
-  });
-  app.querySelectorAll("[data-gimmick]").forEach(sel => sel.onchange = () => {
+  ${myRoles.length ? `<form id="teamform" class="stack" translate="no">${myRoles.map(section).join("")}
+      <button class="btn btn-primary" type="submit">Save teams</button></form>`
+    : `<div class="card"><p class="muted">Claim a role first, then build its teams here.</p><a class="btn btn-gold" href="#/roles">Pick a role</a></div>`}`;
+  if (!myRoles.length) return;
+  app.querySelectorAll("[data-species-for]").forEach(inp => inp.addEventListener("change", () => {
+    const id = inp.dataset.speciesFor, name = inp.value.trim();
+    const sel = document.getElementById(`ab-${id}`);
+    sel.innerHTML = abilityOptions(name, sel.value);
+    document.getElementById(`spr-${id}`).outerHTML = spriteImg(SPECIES_SET.has(name) ? name : "").replace("<img ", `<img id="spr-${id}" `).replace("<span ", `<span id="spr-${id}" `);
+  }));
+  app.querySelectorAll("[data-gimmick]").forEach(sel => sel.addEventListener("change", () => {
     document.getElementById(`tf-${sel.dataset.gimmick}`).hidden = sel.value !== "Tera";
-  });
-
-  document.getElementById("char").onsubmit = async e => {
-    e.preventDefault();
-    const btn = e.submitter; btn.disabled = true;
-    const rolesOut = {};
+  }));
+  watchForm(document.getElementById("teamform"), () => {
+    const roles = {};
     for (const { role } of myRoles) {
       const k = role.id;
       const first = readTeam(`${k}-f`, role.first_team_size), rematch = readTeam(`${k}-r`, 6);
       const problem = teamProblem(first, `${role.label} first battle`) || teamProblem(rematch, `${role.label} rematch`);
-      if (problem) { btn.disabled = false; return toast(problem, true); }
-      rolesOut[k] = {
-        title: document.getElementById(`title-${k}`).value.trim(),
-        ...(role.category === "gym" ? { signature_move: {
-          name: document.getElementById(`sig-${k}`).value.trim(),
-          description: document.getElementById(`sigd-${k}`).value.trim(),
-        } } : {}),
-        first_team: first,
-        rematch_team: rematch,
-        dialogue: {
-          intro: document.getElementById(`di-${k}`).value.trim(),
-          defeat: document.getElementById(`dd-${k}`).value.trim(),
-          extra: document.getElementById(`dx-${k}`).value.split("\n").map(s => s.trim()).filter(Boolean),
-        },
-      };
+      if (problem) { toast(problem, true); markBadField(problem); return false; }
+      roles[k] = { first_team: first, rematch_team: rematch };
     }
-    let look_image = c.look_image;
-    const file = document.getElementById("lookfile").files[0];
-    if (file) {
-      if (file.size > 5 * 1024 * 1024) { btn.disabled = false; return toast("Image is over 5 MB.", true); }
-      const ext = { "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp" }[file.type];
-      if (!ext) { btn.disabled = false; return toast("Use PNG, JPG or WebP.", true); }
-      const path = `${state.user.id}/look-${Date.now()}.${ext}`;
-      const { error } = await sb.storage.from("looks").upload(path, file, { contentType: file.type });
-      if (error) { btn.disabled = false; return fail(error); }
-      look_image = path; // old images are kept so the version history still shows them
-    }
-    const { error } = await sb.from("characters").upsert({
-      user_id: state.user.id,
-      character_name: document.getElementById("cname").value.trim(),
-      look_note: document.getElementById("looknote").value.trim(),
-      look_image,
-      notes: document.getElementById("notes").value.trim(),
-      roles: rolesOut,
-    });
-    btn.disabled = false;
-    if (error) return fail(error);
-    toast("Saved!"); viewMe();
-  };
+    return saveCharacter(c, myRoles, { roles });
+  });
 }
 
-// ---------- ideas & comments ----------
-async function viewIdeas(kind = "idea") {
+// ---------- ideas (private: the author and Abner) ----------
+const IDEA_CATS = { character: "Character", story: "Story", design: "Design", other: "Other" };
+const IDEA_STATUS = { new: "New", considering: "Considering", used: "Used", not_now: "Not now" };
+async function viewIdeas() {
+  const isAdmin = state.profile.is_admin;
   const [{ data: posts }, { data: profiles }] = await Promise.all([
-    sb.from("posts").select("*").eq("kind", kind).order("created_at", { ascending: false }),
+    sb.from("posts").select("*").eq("kind", "idea").order("created_at", { ascending: false }),
     sb.from("profiles").select("id,display_name"),
   ]);
   const who = names(profiles);
   app.innerHTML = `
-  <h1 class="page-title">${kind === "idea" ? "Idea Box" : "Comments"}</h1>
-  <div class="row">
-    <button class="btn btn-small ${kind === "idea" ? "btn-primary" : "btn-ghost"}" data-kind="idea">Idea Box</button>
-    <button class="btn btn-small ${kind === "comment" ? "btn-primary" : "btn-ghost"}" data-kind="comment">Comments</button>
-  </div>
-  <form id="newpost" class="card stack">
-    <div class="field"><label for="body">${kind === "idea" ? "Got an idea for the game?" : "Say something to the crew"}</label>
-      <textarea id="body" rows="3" maxlength="2000" required></textarea></div>
-    <button class="btn btn-gold" type="submit">Post</button>
+  <h1 class="page-title">Idea Box</h1>
+  <div class="idea-intro card"><p class="post-body">Submit any idea for the game: new characters, story or plot, designs, anything else. Only Abner sees what you send, and you can follow what happens to your own ideas here. Every idea is welcome.</p></div>
+  <form id="newidea" class="card stack">
+    <fieldset class="cat-picker"><legend>Category</legend>
+      ${Object.entries(IDEA_CATS).map(([v, l], i) => `<label class="cat-option"><input type="radio" name="cat" value="${v}"${i === 0 ? " checked" : ""}>${l}</label>`).join("")}
+    </fieldset>
+    <div class="field"><label for="body">Your idea</label><textarea id="body" rows="4" maxlength="2000" required></textarea></div>
+    <button class="btn btn-gold" type="submit">Submit</button>
   </form>
+  <h2 class="card-title">${isAdmin ? "All ideas" : "Your ideas"}</h2>
   <div class="stack">
     ${(posts || []).map(p => `
-      <article class="post card ${kind === "idea" ? "idea" : ""}">
-        <p class="post-meta">${esc(who[p.user_id])} · ${fmtDate(p.created_at)}</p>
+      <article class="idea-card card">
+        <div class="post-meta"><span class="idea-cat" data-cat="${esc(p.category)}">${esc(IDEA_CATS[p.category] || p.category)}</span>
+          <span class="idea-status" data-status="${esc(p.status)}">${esc(IDEA_STATUS[p.status] || p.status)}</span>
+          <span>${isAdmin ? `${esc(who[p.user_id])} · ` : ""}${fmtDate(p.created_at)}</span></div>
         <p class="post-body">${esc(p.body)}</p>
-        ${p.user_id === state.user.id || state.profile.is_admin ? `<button class="btn btn-ghost btn-small" data-del="${p.id}">Delete</button>` : ""}
-      </article>`).join("") || `<p class="muted">Nothing here yet. Be the first!</p>`}
+        ${isAdmin ? `<div class="idea-admin"><label class="hint" for="st-${p.id}">Status</label>
+            <select class="idea-status-select" id="st-${p.id}" data-status-for="${p.id}">${Object.entries(IDEA_STATUS).map(([v, l]) => `<option value="${v}"${v === p.status ? " selected" : ""}>${l}</option>`).join("")}</select>
+            <button class="btn btn-ghost btn-small" type="button" data-del="${p.id}">Delete</button></div>`
+          : p.user_id === state.user.id && p.status === "new" ? `<button class="btn btn-ghost btn-small" type="button" data-del="${p.id}">Delete</button>` : ""}
+      </article>`).join("") || `<p class="muted">${isAdmin ? "No ideas yet." : "You haven’t sent any ideas yet."}</p>`}
   </div>`;
-  app.querySelectorAll("[data-kind]").forEach(b => b.onclick = () => viewIdeas(b.dataset.kind));
-  document.getElementById("newpost").onsubmit = async e => {
+  document.getElementById("newidea").onsubmit = async e => {
     e.preventDefault();
     const body = document.getElementById("body").value.trim();
     if (!body) return;
-    const { error } = await sb.from("posts").insert({ kind, body });
-    if (error) return fail(error);
-    viewIdeas(kind);
+    const btn = e.submitter; btn.disabled = true; btn.textContent = "Submitting…";
+    const category = new FormData(e.target).get("cat") || "other";
+    const { error } = await sb.from("posts").insert({ kind: "idea", body, category });
+    if (error) { btn.disabled = false; btn.textContent = "Submit"; return fail(error); }
+    toast("Idea submitted. Thanks!"); viewIdeas();
   };
+  app.querySelectorAll("[data-status-for]").forEach(sel => sel.onchange = async () => {
+    const { error } = await sb.from("posts").update({ status: sel.value }).eq("id", sel.dataset.statusFor);
+    if (error) return fail(error);
+    toast("Status updated."); viewIdeas();
+  });
   app.querySelectorAll("[data-del]").forEach(b => b.onclick = async () => {
-    if (!confirm("Delete this post?")) return;
+    if (!confirm("Delete this idea?")) return;
     const { error } = await sb.from("posts").delete().eq("id", b.dataset.del);
     if (error) return fail(error);
-    viewIdeas(kind);
+    viewIdeas();
   });
 }
 
@@ -751,7 +972,7 @@ async function viewAdmin() {
       <thead><tr><th>Who</th><th>Slot</th><th>Type</th><th>Status</th><th></th></tr></thead>
       <tbody>${(claims || []).map(c => `<tr>
         <td>${esc(who[c.user_id])}</td><td>${esc(roleLabel[c.role_id])}</td><td>${typeChip(c.poke_type)}</td>
-        <td><span class="badge badge-${c.status}">${c.status}</span></td>
+        <td>${statusBadge(c.status)}</td>
         <td class="admin-actions">
           ${c.status !== "approved" ? `<button class="btn btn-primary btn-small" data-set="${c.id}" data-status="approved">Approve</button>` : ""}
           ${c.status !== "rejected" ? `<button class="btn btn-danger btn-small" data-set="${c.id}" data-status="rejected">Reject</button>` : ""}
@@ -761,7 +982,7 @@ async function viewAdmin() {
   </div>
   <div class="request-card card stack"><h2 class="card-title">Custom role requests</h2>
     ${(requests || []).length ? `<ul class="request-list">${requests.map(q => `<li class="request-item stack">
-      <p><b>${esc(who[q.user_id])}</b> wants <b>${esc(q.role_name)}</b> <span class="badge badge-${q.status}">${q.status}</span></p>
+      <p><b>${esc(who[q.user_id])}</b> wants <b>${esc(q.role_name)}</b> ${statusBadge(q.status)}</p>
       <p class="request-reason muted">${esc(q.reason)}</p><p class="meta-date">${esc(fmtDateTime(q.created_at))}</p>
       ${q.status === "pending" ? `<div class="row">
         <div class="field"><label for="rql-${q.id}">Role name</label><input id="rql-${q.id}" maxlength="40" value="${esc(q.role_name)}"></div>
@@ -944,19 +1165,33 @@ async function viewAdmin() {
 }
 
 // ---------- router ----------
-const ROUTES = { home: viewHome, roles: viewRoles, me: viewMe, ideas: () => viewIdeas("idea"), admin: viewAdmin,
+const ROUTES = { home: viewHome, roles: viewRoles, me: viewMe, ideas: viewIdeas, admin: viewAdmin,
   profile: param => (param ? viewProfile(param) : viewProfiles()) };
 let recovering = false;
+let currentHash = location.hash;
 async function route() {
   if (!state.user) return viewLogin();
   if (recovering) return viewSetPassword(false);
   if (state.profile?.must_change_password) return viewSetPassword(true);
+  // Leaving a form with unsaved changes: ask first, and stay (restoring the link) if they cancel
+  if (state.dirty && location.hash !== currentHash) {
+    if (!confirm("You have unsaved changes. Leave without saving?")) { history.replaceState(null, "", currentHash); return; }
+  }
+  state.dirty = false;
+  currentHash = location.hash;
   showShell(true);
-  const [, name = "home", param] = location.hash.match(/^#\/(\w+)(?:\/([\w-]+))?/) || [];
+  const [, name = "home", param, param2] = location.hash.match(/^#\/(\w+)(?:\/([\w-]+))?(?:\/([\w-]+))?/) || [];
   const view = ROUTES[name] || viewHome;
-  document.querySelectorAll("#nav a").forEach(a => a.classList.toggle("active", a.dataset.route === name));
+  document.querySelectorAll("#nav a").forEach(a => {
+    a.classList.toggle("active", a.dataset.route === name);
+    if (a.dataset.route === name) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+  });
   app.innerHTML = `<p class="loading">Loading…</p>`;
-  try { await view(param); } catch (e) { fail(e); }
+  try { await view(param, param2); } catch (e) { fail(e); }
+  // Tell screen readers the page changed: new title, focus on the page heading
+  const h1 = app.querySelector("h1");
+  document.title = (h1 ? h1.textContent.trim() + " · " : "") + "Emerald Lost Generation";
+  if (h1 && document.activeElement?.closest?.("#nav, .subtabs, .back-link, .crew-link, a")) { h1.tabIndex = -1; h1.focus({ preventScroll: true }); }
 }
 window.addEventListener("hashchange", route);
 

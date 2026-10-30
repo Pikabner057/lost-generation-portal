@@ -187,7 +187,6 @@ input::placeholder, textarea::placeholder { color: var(--muted); opacity: 1; }
 .panel, dialog.sheet { width: min(100% - 2rem, 760px); max-height: min(85vh, 900px); overflow: auto; padding: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
 .panel { margin: var(--space-4) 0; }
 dialog.sheet { margin: auto; }
-dialog.sheet[open] { position: relative; inset: auto; margin: 0; }
 dialog.sheet.sheet-preview[open] { position: relative; inset: auto; margin: 0; }
 dialog.sheet::backdrop, .panel::backdrop { background: rgb(0 0 0 / 68%); }
 .panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-4); }
@@ -254,7 +253,7 @@ dialog.sheet::backdrop, .panel::backdrop { background: rgb(0 0 0 / 68%); }
 }
 
 @media (max-width: 520px) {
-  dialog.sheet { position: fixed; inset: auto 0 0; width: 100%; max-width: none; max-height: 88vh; margin: 0; border-radius: var(--radius) var(--radius) 0 0; }
+  dialog.sheet, dialog.sheet[open] { position: fixed; inset: auto 0 0; width: 100%; max-width: none; max-height: 88dvh; margin: 0; border-radius: var(--radius) var(--radius) 0 0; }
 }
 
 @media (min-width: 760px) {
@@ -264,3 +263,73 @@ dialog.sheet::backdrop, .panel::backdrop { background: rgb(0 0 0 / 68%); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* v8: character, team, and private idea components */
+.subtabs { display: flex; width: 100%; gap: .25rem; padding: .25rem; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-raised); }
+.subtab { display: flex; min-width: 44px; min-height: 44px; flex: 1 1 0; align-items: center; justify-content: center; padding: .5rem .75rem; border-radius: 999px; color: var(--muted); font-weight: 800; text-align: center; text-decoration: none; overflow-wrap: anywhere; }
+.subtab[aria-current="page"] { background: var(--emerald); color: var(--emerald-ink); box-shadow: 0 2px 8px rgb(0 0 0 / 18%); }
+.trainer-card { --trainer-accent: var(--gold); display: grid; grid-template-columns: minmax(0, 1fr); overflow: hidden; min-width: 0; border: 1px solid var(--border); border-inline-start: 5px solid var(--trainer-accent); border-radius: var(--radius); background: linear-gradient(135deg, color-mix(in srgb, var(--trainer-accent) 10%, var(--surface)), var(--surface) 48%); box-shadow: var(--shadow); }
+.trainer-card[data-type="Steel"] { --trainer-accent: #aebdc5; }
+.trainer-card[data-type="Fire"] { --trainer-accent: #e58b50; }
+.trainer-card[data-type="Water"] { --trainer-accent: #609bda; }
+.trainer-card[data-type="Grass"] { --trainer-accent: #69a849; }
+.trainer-card[data-type="Electric"] { --trainer-accent: #bd9a12; }
+.trainer-card[data-type="Ghost"] { --trainer-accent: #8372b7; }
+.trainer-card-art { display: grid; min-height: 180px; max-height: 280px; place-items: center; overflow: hidden; background: linear-gradient(145deg, var(--surface-raised), color-mix(in srgb, var(--trainer-accent) 25%, var(--surface))); }
+.trainer-card-art img { width: 100%; height: 100%; min-height: 180px; max-height: 280px; object-fit: cover; }
+.trainer-card-placeholder { display: grid; width: 100%; min-height: 180px; place-items: center; color: var(--trainer-accent); font: 700 4rem/1 var(--font-display); }
+.trainer-card-body { display: flex; min-width: 0; flex-direction: column; gap: var(--space-3); padding: var(--space-4); }
+.trainer-card-title { margin: 0; color: var(--gold); font-size: var(--text-sm); font-weight: 900; }
+.trainer-card-name { margin: 0; font: 700 var(--text-2xl)/.95 var(--font-display); overflow-wrap: anywhere; }
+.trainer-card-player { margin: 0; color: var(--muted); }
+.trainer-card-roles { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.trainer-card-roles li { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.trainer-card-id { margin: 0; padding: .65rem var(--space-4); border-top: 1px solid var(--border); color: var(--muted); font-size: var(--text-xs); font-weight: 800; letter-spacing: .08em; }
+.trainer-card.is-compact { grid-template-columns: 72px minmax(0, 1fr); border-inline-start-width: 4px; }
+.trainer-card.is-compact .trainer-card-art, .trainer-card.is-compact .trainer-card-art img, .trainer-card.is-compact .trainer-card-placeholder { min-height: 90px; max-height: 100%; }
+.trainer-card.is-compact .trainer-card-body { gap: var(--space-2); padding: var(--space-3); }
+.trainer-card.is-compact .trainer-card-name { font-size: var(--text-xl); }
+.trainer-card.is-compact .trainer-card-id { grid-column: 1 / -1; }
+.team-strip { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.team-strip-mon { display: flex; min-width: 54px; flex-direction: column; align-items: center; gap: 0; color: var(--muted); font-size: var(--text-xs); font-weight: 800; text-align: center; overflow-wrap: anywhere; }
+.poke-sprite { width: 56px; height: 56px; object-fit: contain; image-rendering: pixelated; }
+.team-strip .poke-sprite { width: 40px; height: 40px; }
+.role-list { display: grid; gap: var(--space-2); }
+.role-link { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-2); min-height: 56px; padding: .5rem .75rem; border: 1px solid var(--border); border-radius: var(--radius-small); background: var(--surface); color: var(--text); text-decoration: none; }
+.role-link:hover { border-color: var(--accent); background: var(--surface-raised); }
+.role-link-label { min-width: 0; font-weight: 800; overflow-wrap: anywhere; }
+.role-link-chevron { color: var(--accent); font-size: 1.5rem; }
+.role-detail { min-width: 0; }
+.back-link { display: inline-flex; min-height: 44px; align-items: center; color: var(--accent); font-weight: 800; }
+.role-desc { padding: var(--space-4); border-inline-start: 4px solid var(--accent); border-radius: var(--radius-small); background: var(--surface-raised); }
+.role-desc strong { display: block; margin-bottom: var(--space-1); color: var(--accent); }
+.role-desc p { margin: 0; }
+.poke-slot-head { display: flex; align-items: center; gap: var(--space-3); min-height: 56px; font-weight: 800; }
+.poke-sprite.is-empty { display: inline-grid; flex: 0 0 56px; place-items: center; border: 2px dotted var(--muted); border-radius: 50%; background: radial-gradient(circle at center, transparent 0 34%, var(--border) 35% 39%, transparent 40%); color: var(--muted); }
+.idea-intro { border-inline-start: 5px solid var(--gold); background: linear-gradient(115deg, color-mix(in srgb, var(--gold) 10%, var(--surface)), var(--surface) 65%); }
+.idea-intro::before { content: "✦"; float: inline-start; margin-inline-end: var(--space-3); color: var(--gold); font-size: 1.5rem; }
+.cat-picker { display: flex; flex-wrap: wrap; gap: var(--space-2); min-width: 0; margin: 0; padding: var(--space-3); border: 1px solid var(--border); border-radius: var(--radius); }
+.cat-picker legend { padding: 0 var(--space-2); font-weight: 900; }
+.cat-option { position: relative; display: inline-flex; min-height: 44px; align-items: center; justify-content: center; padding: .5rem .8rem; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); font-weight: 800; cursor: pointer; }
+.cat-option input { position: absolute; width: 1px; height: 1px; min-height: 0; opacity: 0; }
+.cat-option:has(input:checked) { border-color: var(--emerald); background: var(--emerald); color: var(--emerald-ink); }
+.cat-option:has(input:focus-visible) { outline: 3px solid var(--focus); outline-offset: 3px; }
+.idea-card { min-width: 0; border-inline-start: 4px solid var(--accent); overflow-wrap: anywhere; }
+.idea-cat, .idea-status { display: inline-flex; min-height: 28px; align-items: center; padding: .2rem .6rem; border-radius: 999px; font-size: var(--text-xs); font-weight: 900; }
+.idea-cat { background: var(--surface-raised); color: var(--accent); }
+.idea-status[data-status="new"] { background: #d5e9ff; color: #183b60; }
+.idea-status[data-status="considering"] { background: #fff0bd; color: #493600; }
+.idea-status[data-status="used"] { background: #ccebd4; color: #174a29; }
+.idea-status[data-status="not_now"] { background: #e5e5e5; color: #393939; }
+.idea-admin { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.idea-admin .idea-status-select { width: auto; min-width: 150px; min-height: 44px; }
+.crew-story .story-text { max-width: 65ch; margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+.unsaved-bar { position: sticky; z-index: 4; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: .75rem max(1rem, env(safe-area-inset-left)) calc(.75rem + env(safe-area-inset-bottom)); border: 1px solid var(--gold); border-radius: var(--radius) var(--radius) 0 0; background: var(--surface); box-shadow: 0 -8px 24px rgb(0 0 0 / 22%); font-weight: 800; }
+.unsaved-bar[hidden] { display: none; }
+@media (min-width: 520px) {
+  .trainer-card { grid-template-columns: minmax(150px, 34%) minmax(0, 1fr); }
+  .trainer-card-art, .trainer-card-art img, .trainer-card-placeholder { min-height: 250px; max-height: 340px; }
+  .trainer-card-id { grid-column: 1 / -1; }
+  .unsaved-bar { position: fixed; inset: auto 0 0; padding-inline: max(1rem, calc((100vw - 1180px) / 2)); }
+}
+@media (max-width: 430px) { .role-link { grid-template-columns: minmax(0, 1fr) auto; } .role-link .badge { grid-column: 1; grid-row: 2; } .role-link-chevron { grid-column: 2; grid-row: 1 / 3; } }

@@ -6,3 +6,51 @@
 .app-header { flex-wrap: wrap; }
 #theme-toggle-auth { position: fixed; top: 12px; right: 12px; z-index: 40; }
 details.post > summary { cursor: pointer; }
+
+/* v8: whole trainer card clickable in the Crew grid */
+.crew-link { display: block; color: inherit; text-decoration: none; border-radius: var(--radius); }
+.crew-link:hover .trainer-card { border-color: var(--accent); }
+.crew-link:focus-visible { outline: 3px solid var(--focus); outline-offset: 3px; }
+.role-link .badge { justify-self: start; }
+.idea-intro::before { content: none; }
+.idea-intro .post-body::before { content: "✦ "; color: var(--gold); font-size: 1.2em; }
+/* Trainer card accent for every type (Codex covered six) */
+.trainer-card[data-type="Normal"] { --trainer-accent: #b8b39c; }
+.trainer-card[data-type="Ice"] { --trainer-accent: #6ccfd6; }
+.trainer-card[data-type="Fighting"] { --trainer-accent: #d4685a; }
+.trainer-card[data-type="Poison"] { --trainer-accent: #b170c4; }
+.trainer-card[data-type="Ground"] { --trainer-accent: #c9a464; }
+.trainer-card[data-type="Flying"] { --trainer-accent: #8ea2e6; }
+.trainer-card[data-type="Psychic"] { --trainer-accent: #e9719d; }
+.trainer-card[data-type="Bug"] { --trainer-accent: #a2b83a; }
+.trainer-card[data-type="Rock"] { --trainer-accent: #b89f5f; }
+.trainer-card[data-type="Dragon"] { --trainer-accent: #6f8ff0; }
+.trainer-card[data-type="Dark"] { --trainer-accent: #8a7a6e; }
+.trainer-card[data-type="Fairy"] { --trainer-accent: #ec8fb5; }
+
+/* v8 design audit fixes */
+html { scroll-padding-top: 5.5rem; }
+.skip-link { position: absolute; left: 1rem; top: -4rem; z-index: 60; padding: .6rem 1rem; border-radius: var(--radius-small); background: var(--gold); color: var(--gold-ink); font-weight: 800; }
+.skip-link:focus { top: max(.75rem, env(safe-area-inset-top)); }
+#app:focus { outline: none; }
+.app-header { padding-top: max(.75rem, env(safe-area-inset-top)); padding-left: max(1rem, env(safe-area-inset-left), calc((100vw - 1180px) / 2)); padding-right: max(1rem, env(safe-area-inset-right), calc((100vw - 1180px) / 2)); }
+@media (max-width: 520px) {
+  .app-header { position: static; }               /* a 3-row sticky header ate a quarter of the screen */
+  html { scroll-padding-top: 1rem; }
+  .nav { -webkit-mask-image: linear-gradient(to right, #000 85%, transparent); mask-image: linear-gradient(to right, #000 85%, transparent); padding-right: 2rem; }
+}
+#toasts { bottom: calc(16px + env(safe-area-inset-bottom)); }
+body:has(.unsaved-bar:not([hidden])) #toasts { bottom: calc(84px + env(safe-area-inset-bottom)); }
+body:has(.unsaved-bar:not([hidden])) main.container { padding-bottom: 7rem; }
+.toast { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; }
+.toast-close { min-height: 36px; padding: .3rem .7rem; border: 1px solid currentColor; border-radius: var(--radius-small); background: transparent; font-weight: 800; cursor: pointer; }
+.unsaved-bar { padding-inline: max(1rem, env(safe-area-inset-left)) max(1rem, env(safe-area-inset-right)); }
+#theme-toggle-auth { top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); }
+@media (hover: none) { .btn:hover:not(:disabled) { transform: none; filter: none; } }
+.btn-ghost:hover:not(:disabled) { background: var(--surface-raised); }
+a, button, input, select, textarea, summary, label { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+@media (pointer: coarse) { .btn-small { min-height: 44px; } }
+dialog.sheet { overscroll-behavior: contain; padding-bottom: max(var(--space-5), env(safe-area-inset-bottom)); }
+.post-body, .request-reason { overflow-wrap: anywhere; white-space: pre-line; }
+.page-title, .card-title, .trainer-card-name { text-wrap: balance; }
+[aria-invalid="true"] { border-color: var(--danger) !important; box-shadow: 0 0 0 2px var(--danger); }
