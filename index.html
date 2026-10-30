@@ -6,10 +6,14 @@
 <title>Emerald Lost Generation</title>
 <meta name="description" content="Friend portal for the Emerald Lost Generation ROM hack.">
 <meta name="robots" content="noindex">
+<meta name="theme-color" content="#08130F">
 <script>
   // Apply the saved theme before first paint (no flash).
-  try { var t = localStorage.getItem("elg-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; } catch (e) {}
+  try { var t = localStorage.getItem("elg-theme"); if (t === "light" || t === "dark") document.documentElement.dataset.theme = t;
+        if (t === "light") document.querySelector('meta[name="theme-color"]').content = "#F5FAF6"; } catch (e) {}
 </script>
+<link rel="preconnect" href="https://ejworaccnktuzlevzydn.supabase.co" crossorigin>
+<link rel="modulepreload" href="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Nunito+Sans:wght@400;600;700;800;900&display=swap" rel="stylesheet">
@@ -17,8 +21,9 @@
 <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
+<a class="skip-link" href="#app" id="skip">Skip to content</a>
 <header class="app-header" id="header" hidden>
-  <a class="brand" href="#/home">Emerald Lost Generation</a>
+  <a class="brand" href="#/home" translate="no">Emerald Lost Generation</a>
   <nav class="nav" id="nav">
     <a href="#/home" data-route="home">Home</a>
     <a href="#/roles" data-route="roles">Roles</a>
@@ -28,12 +33,12 @@
     <a href="#/admin" data-route="admin" id="nav-admin" hidden>Admin</a>
   </nav>
   <div class="row">
-    <button class="theme-toggle btn btn-ghost btn-small" id="theme-toggle" type="button" aria-label="Switch theme">Light mode</button>
+    <button class="theme-toggle btn btn-ghost btn-small" id="theme-toggle" type="button">Light mode</button>
     <button class="btn btn-ghost btn-small" id="logout" type="button">Log out</button>
   </div>
 </header>
-<button class="theme-toggle btn btn-ghost btn-small" id="theme-toggle-auth" type="button" aria-label="Switch theme" hidden>Light mode</button>
-<main class="container" id="app"><p class="loading">Loading…</p></main>
+<button class="theme-toggle btn btn-ghost btn-small" id="theme-toggle-auth" type="button" hidden>Light mode</button>
+<main class="container" id="app" tabindex="-1"><p class="loading">Loading…</p></main>
 <div id="toasts" aria-live="polite"></div>
 <dialog class="sheet" id="sheet"></dialog>
 <script type="module" src="js/app.js"></script>
