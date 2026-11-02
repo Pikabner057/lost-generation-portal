@@ -54,3 +54,13 @@ dialog.sheet { overscroll-behavior: contain; padding-bottom: max(var(--space-5),
 .post-body, .request-reason { overflow-wrap: anywhere; white-space: pre-line; }
 .page-title, .card-title, .trainer-card-name { text-wrap: balance; }
 [aria-invalid="true"] { border-color: var(--danger) !important; box-shadow: 0 0 0 2px var(--danger); }
+
+/* ---------- picked-picture preview + surprise-logout log ---------- */
+.pick-preview:empty { display: none; }
+.pick-preview { display: flex; align-items: center; gap: .75rem; margin-top: .5rem; }
+.pick-preview img { width: 72px; height: 72px; object-fit: cover; border-radius: 12px; border: 1px solid var(--border, #444); }
+.pick-preview .hint { margin: 0; }
+.auth-log { font-size: .85rem; }
+.auth-log summary { cursor: pointer; color: var(--muted, #999); }
+.auth-log ol { margin: .5rem 0; padding-left: 1.25rem; }
+.auth-log .hint { word-break: break-all; }
