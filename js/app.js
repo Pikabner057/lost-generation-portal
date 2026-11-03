@@ -414,7 +414,8 @@ function characterDetails(s, imgUrl, roleLabel = {}) {
       <p><b>Extra:</b> ${esc((d.extra || []).join(" / ") || "—")}</p></div>`;
   }).join("");
   return `
-    ${imgUrl ? `<div class="look-preview"><img src="${esc(imgUrl)}" alt="Look reference"></div>` : ""}
+    ${imgUrl ? `<div class="look-preview"><img src="${esc(imgUrl)}" alt="Look reference"></div>
+      <a class="look-full" href="${esc(imgUrl)}" target="_blank" rel="noopener">View full image</a>` : ""}
     <p><b>Character:</b> ${esc(s.character_name || "—")}</p>
     <p><b>Backstory:</b> ${esc(s.backstory || "—")}</p>
     <p><b>Personality:</b> ${esc(s.personality || "—")}</p>
@@ -605,6 +606,28 @@ async function viewProfile(id) {
     </div>` : ""}`;
 }
 
+// Fold-away sections (<details class="fold" data-fold="id">) remember open/closed for this tab,
+// so a Save (which re-renders the page) doesn't snap everything shut again.
+function foldsRemember(scope) {
+  app.querySelectorAll("details.fold[data-fold]").forEach(d => {
+    const key = `elg-fold:${scope}:${d.dataset.fold}`;
+    try { const saved = sessionStorage.getItem(key); if (saved !== null) d.open = saved === "1"; } catch (e) {}
+    d.addEventListener("toggle", () => { try { sessionStorage.setItem(key, d.open ? "1" : "0"); } catch (e) {} });
+  });
+}
+function foldAllButtons() {
+  return `<div class="fold-tools"><button class="btn btn-ghost btn-small" type="button" data-fold-all="1">Open all</button>
+    <button class="btn btn-ghost btn-small" type="button" data-fold-all="0">Close all</button></div>`;
+}
+function wireFoldAll() {
+  app.querySelectorAll("[data-fold-all]").forEach(b => b.onclick = () =>
+    app.querySelectorAll("details.fold").forEach(d => { d.open = b.dataset.foldAll === "1"; }));
+}
+function miniSprites(team) {
+  const mons = (team || []).filter(m => m.species);
+  return mons.length ? `<span class="fold-sprites" aria-hidden="true">${mons.map(m => spriteImg(m.species, "poke-sprite", 44)).join("")}</span>` : "";
+}
+
 // ===== TEAM BUILDER (shared by My Character) =====
 function abilityOptions(species, current) {
   const list = ABILITIES[species] || [];
@@ -614,8 +637,10 @@ function abilityOptions(species, current) {
 function pokeSlotHtml(key, i, m) {
   const id = `${key}-${i}`;
   const g = m.gimmick || "None";
-  return `<div class="poke-slot stack">
-    <div class="poke-slot-head">${spriteImg(m.species).replace(/^<(img|span) /, `<$1 id="spr-${id}" `)}<span class="poke-slot-num">${i + 1}</span></div>
+  return `<details class="poke-slot">
+    <summary class="poke-slot-head">${spriteImg(m.species).replace(/^<(img|span) /, `<$1 id="spr-${id}" `)}<span class="poke-slot-num">${i + 1}</span>
+      <span class="poke-slot-name" id="pn-${id}">${slotName(m)}</span></summary>
+    <div class="poke-slot-body stack">
     <div class="field"><label for="sp-${id}">Pokémon</label><input id="sp-${id}" list="species" value="${esc(m.species)}" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off" data-species-for="${id}"></div>
     <div class="field"><label for="nn-${id}">Nickname</label><input id="nn-${id}" maxlength="12" value="${esc(m.nickname)}" autocomplete="off" spellcheck="false"></div>
     <div class="field"><label for="it-${id}">Held item</label><input id="it-${id}" list="items" value="${esc(m.item)}" autocomplete="off" spellcheck="false" autocorrect="off" autocapitalize="off"></div>
@@ -627,7 +652,11 @@ function pokeSlotHtml(key, i, m) {
     <div class="field tera-field" id="tf-${id}" ${g === "Tera" ? "" : "hidden"}><label for="tt-${id}">Tera type</label><select id="tt-${id}">
       <option value="">Pick…</option>${TERA_TYPES.map(t => `<option${t === m.tera ? " selected" : ""}>${t}</option>`).join("")}</select></div>
     <div class="field"><label for="no-${id}">Note (strategy, EVs, nature…)</label><input id="no-${id}" maxlength="120" value="${esc(m.note)}" autocomplete="off"></div>
-  </div>`;
+  </div></details>`;
+}
+// One-line label for a folded Pokémon slot
+function slotName(m) {
+  return m.species ? `<b>${esc(m.nickname || m.species)}</b>${m.item ? ` <span class="muted">@ ${esc(m.item)}</span>` : ""}` : `<span class="muted">Empty slot</span>`;
 }
 function readTeam(key, size) {
   const out = [];
@@ -804,7 +833,8 @@ async function viewMeCharacter() {
     </div>
     <div class="card stack"><h2 class="card-title">Style</h2>
       <div class="field"><label for="looknote">Describe your character</label><textarea id="looknote" rows="5" maxlength="2000" placeholder="Describe your character in detail: hair, eyes, outfit, colors, accessories…">${esc(c.look_note)}</textarea></div>
-      <div class="look-preview">${lookUrl ? `<img src="${esc(lookUrl)}" alt="Your reference image">` : ""}</div>
+      ${lookUrl ? `<div class="look-preview"><img src="${esc(lookUrl)}" alt="Your reference image"></div>
+        <a class="look-full" href="${esc(lookUrl)}" target="_blank" rel="noopener">View full image</a>` : ""}
       <div class="field"><label for="lookfile">Reference image for Abner (optional)</label><input id="lookfile" type="file" accept="image/*">
         <div class="pick-preview" id="lookfile-preview"></div>
         <p class="hint">If you have a picture of how they should look, send it here.</p></div>
@@ -882,32 +912,35 @@ function markBadField(msg) {
   if (!want) return;
   const el = [...document.querySelectorAll("#teamform input, #teamform select")].find(x => x.value.trim() === want);
   if (!el) return;
+  for (let d = el.closest("details"); d; d = d.parentElement.closest("details")) d.open = true;
   el.setAttribute("aria-invalid", "true");
   el.scrollIntoView({ block: "center" });
   el.focus({ preventScroll: true });
 }
 async function viewMeTeams() {
   const { c, myRoles } = await loadMe();
+  const count = (team, size) => `${(team || []).filter(m => m.species).length}/${size}`;
+  const battle = (key, title, note, size, team, cls) => `<details class="fold team-section ${cls}" data-fold="${esc(key)}">
+      <summary class="fold-summary"><span class="fold-title"><span class="team-section-title">${title}</span>
+        <span class="team-size-note">${note}</span></span>
+        <span class="fold-side"><span class="fold-sprites-slot" id="sum-${esc(key)}">${miniSprites(team)}</span>
+        <span class="fold-count" id="cnt-${esc(key)}">${count(team, size)}</span></span></summary>
+      <div class="team-grid">${Array.from({ length: size }, (_, i) => pokeSlotHtml(key, i, (team || [])[i] || {})).join("")}</div>
+    </details>`;
   const section = ({ claim, role, data }) => {
     const k = role.id;
-    const first = Array.from({ length: role.first_team_size }, (_, i) => (data.first_team || [])[i] || {});
-    const rematch = Array.from({ length: 6 }, (_, i) => (data.rematch_team || [])[i] || {});
-    return `<section class="role-entry card stack">
-      <div class="role-entry-head"><h2 class="card-title">${esc(role.label)}</h2> ${typeChip(claim.poke_type)}</div>
-      <div class="team-section first stack">
-        <div class="team-section-head"><h3 class="team-section-title">First battle</h3>
-          <span class="team-size-note">${role.first_team_size} Pokémon${claim.poke_type ? ` · ${esc(claim.poke_type)} specialist` : " · any type"}</span></div>
-        <div class="team-grid">${first.map((m, i) => pokeSlotHtml(`${k}-f`, i, m)).join("")}</div>
+    return `<details class="fold role-entry card" data-fold="role-${esc(k)}"${myRoles.length === 1 ? " open" : ""}>
+      <summary class="fold-summary"><span class="fold-title"><h2 class="card-title">${esc(role.label)}</h2> ${typeChip(claim.poke_type)}</span>
+        <span class="fold-count">First ${count(data.first_team, role.first_team_size)} · Rematch ${count(data.rematch_team, 6)}</span></summary>
+      <div class="stack fold-body">
+        ${battle(`${k}-f`, "First battle", `${role.first_team_size} Pokémon${claim.poke_type ? ` · ${esc(claim.poke_type)} specialist` : " · any type"}`, role.first_team_size, data.first_team, "first")}
+        ${battle(`${k}-r`, "Rematch (after the Elite Four)", "Full team of 6", 6, data.rematch_team, "rematch")}
       </div>
-      <div class="team-section rematch stack">
-        <div class="team-section-head"><h3 class="team-section-title">Rematch (after the Elite Four)</h3>
-          <span class="team-size-note">Full team of 6</span></div>
-        <div class="team-grid">${rematch.map((m, i) => pokeSlotHtml(`${k}-r`, i, m)).join("")}</div>
-      </div>
-    </section>`;
+    </details>`;
   };
   app.innerHTML = `${meTabs("teams")}
-  <p class="muted">Only you and Abner can see your teams, so nobody can prep against you.</p>
+  <div class="fold-intro"><p class="muted">Only you and Abner can see your teams, so nobody can prep against you. Tap a battle to open it.</p>
+    ${myRoles.length ? foldAllButtons() : ""}</div>
   <datalist id="species">${SPECIES.map(s => `<option value="${esc(s)}">`).join("")}</datalist>
   <datalist id="items">${ITEMS.map(s => `<option value="${esc(s)}">`).join("")}</datalist>
   <datalist id="moves">${MOVES.map(s => `<option value="${esc(s)}">`).join("")}</datalist>
@@ -915,11 +948,24 @@ async function viewMeTeams() {
       <button class="btn btn-primary" type="submit">Save teams</button></form>`
     : `<div class="card"><p class="muted">Claim a role first, then build its teams here.</p><a class="btn btn-gold" href="#/roles">Pick a role</a></div>`}`;
   if (!myRoles.length) return;
+  foldsRemember("teams");
+  wireFoldAll();
+  // Pokémon forms start open where there's room (3 per row), folded to one line on phones
+  if (matchMedia("(min-width: 760px)").matches) app.querySelectorAll("details.poke-slot").forEach(d => { d.open = true; });
+  app.querySelectorAll("details.poke-slot").forEach(d => d.addEventListener("input", () => {
+    const id = d.querySelector("[data-species-for]").dataset.speciesFor, v = s => document.getElementById(`${s}-${id}`).value.trim();
+    document.getElementById(`pn-${id}`).innerHTML = slotName({ species: v("sp"), nickname: v("nn"), item: v("it") });
+  }));
   app.querySelectorAll("[data-species-for]").forEach(inp => inp.addEventListener("change", () => {
     const id = inp.dataset.speciesFor, name = inp.value.trim();
     const sel = document.getElementById(`ab-${id}`);
     sel.innerHTML = abilityOptions(name, sel.value);
     document.getElementById(`spr-${id}`).outerHTML = spriteImg(SPECIES_SET.has(name) ? name : "").replace("<img ", `<img id="spr-${id}" `).replace("<span ", `<span id="spr-${id}" `);
+    // Keep the closed-battle summary (sprites + count) in step with what's typed
+    const key = id.replace(/-\d+$/, ""), size = inp.closest(".team-grid").children.length;
+    const team = readTeam(key, size).filter(m => SPECIES_SET.has(m.species));
+    document.getElementById(`sum-${key}`).innerHTML = miniSprites(team);
+    document.getElementById(`cnt-${key}`).textContent = `${team.length}/${size}`;
   }));
   app.querySelectorAll("[data-gimmick]").forEach(sel => sel.addEventListener("change", () => {
     document.getElementById(`tf-${sel.dataset.gimmick}`).hidden = sel.value !== "Tera";
@@ -1006,24 +1052,40 @@ async function viewAdmin() {
     sb.from("role_requests").select("*").order("created_at", { ascending: false }),
   ]);
   const who = names(profiles);
+  // Things waiting on Abner go to the top of their lists
+  const pendingFirst = (a, b) => (b.status === "pending") - (a.status === "pending");
+  claims?.sort(pendingFirst); requests?.sort(pendingFirst);
   const approvedOf = Object.fromEntries((profiles || []).map(p => [p.id, { title: p.approved_title, character_name: p.approved_character_name, approved_at: p.approved_at }]));
   const roleLabel = Object.fromEntries((roles || []).map(r => [r.id, r.label]));
+  const pendingClaims = (claims || []).filter(c => c.status === "pending").length;
+  const pendingReqs = (requests || []).filter(q => q.status === "pending").length;
+  const openRoles = (roles || []).filter(r => !(claims || []).some(c => c.role_id === r.id && c.status !== "rejected")).length;
+  const joined = (invites || []).filter(i => i.used_at).length;
+  const pill = (n, label, hot) => `<span class="fold-pill${hot && n ? " is-hot" : ""}">${n} ${label}</span>`;
+  // One fold-away group per job; the review queue opens itself when something is waiting
+  const group = (id, title, pills, body, open = false) => `<details class="fold card admin-fold" data-fold="${id}"${open ? " open" : ""}>
+    <summary class="fold-summary"><span class="fold-title"><h2 class="card-title">${title}</h2></span><span class="fold-side">${pills}</span></summary>
+    <div class="stack fold-body">${body}</div></details>`;
+  const sub = (id, title, body, open = false) => `<details class="fold admin-sub" data-fold="${id}"${open ? " open" : ""}>
+    <summary class="fold-summary"><span class="fold-title"><h3 class="team-section-title">${title}</h3></span></summary>
+    <div class="fold-body">${body}</div></details>`;
   app.innerHTML = `
-  <h1 class="page-title">Admin</h1>
-  <div class="card stack"><h2 class="card-title">Claims</h2>
+  <div class="fold-intro"><h1 class="page-title">Admin</h1>${foldAllButtons()}</div>
+  ${group("review", "Review queue", pill(pendingClaims, "claims to review", true) + pill(pendingReqs, "role requests", true), `
+    ${sub("claims", `Claims (${(claims || []).length})`, `
     <div class="table"><table>
-      <thead><tr><th>Who</th><th>Slot</th><th>Type</th><th>Status</th><th></th></tr></thead>
-      <tbody>${(claims || []).map(c => `<tr>
-        <td>${esc(who[c.user_id])}</td><td>${esc(roleLabel[c.role_id])}</td><td>${typeChip(c.poke_type)}</td>
-        <td>${statusBadge(c.status)}</td>
-        <td class="admin-actions">
-          ${c.status !== "approved" ? `<button class="btn btn-primary btn-small" data-set="${c.id}" data-status="approved">Approve</button>` : ""}
-          ${c.status !== "rejected" ? `<button class="btn btn-danger btn-small" data-set="${c.id}" data-status="rejected">Reject</button>` : ""}
-          <button class="btn btn-ghost btn-small" data-unclaim="${c.id}" data-who="${esc(who[c.user_id])}" data-role="${esc(roleLabel[c.role_id])}">Remove</button>
-        </td></tr>`).join("") || `<tr><td colspan="5" class="muted">No claims yet.</td></tr>`}</tbody>
-    </table></div>
-  </div>
-  <div class="request-card card stack"><h2 class="card-title">Custom role requests</h2>
+        <thead><tr><th>Who</th><th>Slot</th><th>Type</th><th>Status</th><th></th></tr></thead>
+        <tbody>${(claims || []).map(c => `<tr>
+          <td>${esc(who[c.user_id])}</td><td>${esc(roleLabel[c.role_id])}</td><td>${typeChip(c.poke_type)}</td>
+          <td>${statusBadge(c.status)}</td>
+          <td class="admin-actions">
+            ${c.status !== "approved" ? `<button class="btn btn-primary btn-small" data-set="${c.id}" data-status="approved">Approve</button>` : ""}
+            ${c.status !== "rejected" ? `<button class="btn btn-danger btn-small" data-set="${c.id}" data-status="rejected">Reject</button>` : ""}
+            <button class="btn btn-ghost btn-small" data-unclaim="${c.id}" data-who="${esc(who[c.user_id])}" data-role="${esc(roleLabel[c.role_id])}">Remove</button>
+          </td></tr>`).join("") || `<tr><td colspan="5" class="muted">No claims yet.</td></tr>`}</tbody>
+      </table></div>
+      `, pendingClaims > 0)}
+    ${sub("requests", `Custom role requests (${(requests || []).length})`, `<div class="request-card stack">
     ${(requests || []).length ? `<ul class="request-list">${requests.map(q => `<li class="request-item stack">
       <p><b>${esc(who[q.user_id])}</b> wants <b>${esc(q.role_name)}</b> ${statusBadge(q.status)}</p>
       <p class="request-reason muted">${esc(q.reason)}</p><p class="meta-date">${esc(fmtDateTime(q.created_at))}</p>
@@ -1036,8 +1098,9 @@ async function viewAdmin() {
         <button class="btn btn-danger btn-small" type="button" data-rq-reject="${q.id}">Reject</button>
       </div>` : ""}
     </li>`).join("")}</ul>` : `<p class="muted">No requests yet.</p>`}
-  </div>
-  <form id="sizes" class="card stack"><h2 class="card-title">Roles &amp; team sizes</h2>
+    </div>`, pendingReqs > 0)}`, pendingClaims + pendingReqs > 0)}
+  ${group("roles", "Roles &amp; teams", pill((roles || []).length, "roles") + pill(openRoles, "open"), `
+    ${sub("sizes", "Team sizes and delete", `<form id="sizes" class="stack">
     <p class="muted">First-battle size per role (rematches are always 6). Deleting a role also removes its claims and that role’s teams.</p>
     <div class="size-table table"><table>
       <thead><tr><th>Role</th><th>Held by</th><th>First battle</th><th></th></tr></thead>
@@ -1049,8 +1112,8 @@ async function viewAdmin() {
       }).join("")}</tbody>
     </table></div>
     <button class="btn btn-gold" type="submit">Save sizes</button>
-  </form>
-  <form id="assign" class="card stack"><h2 class="card-title">Assign a role</h2>
+    </form>`)}
+    ${sub("assign", "Assign a role", `<form id="assign" class="stack">
     <p class="muted">Gives a friend a role, already approved. They can still only hold 2.</p>
     <div class="field"><label for="as-user">Friend</label><select id="as-user" required>
       <option value="">Pick a friend…</option>${(profiles || []).map(p => `<option value="${p.id}">${esc(p.display_name)}</option>`).join("")}</select></div>
@@ -1060,8 +1123,8 @@ async function viewAdmin() {
     <div class="field" id="as-type-field" hidden><label for="as-type">Type</label><select id="as-type">
       <option value="">Pick a type…</option>${TYPES.filter(t => !(claims || []).some(c => c.poke_type === t && c.status !== "rejected")).map(t => `<option>${t}</option>`).join("")}</select></div>
     <button class="btn btn-primary" type="submit">Assign role</button>
-  </form>
-  <form id="newrole" class="card stack"><h2 class="card-title">Create a role</h2>
+    </form>`)}
+    ${sub("newrole", "Create a role", `<form id="newrole" class="stack">
     <p class="muted">Add a slot yourself. Friends can then claim it (or assign it above).</p>
     <div class="field"><label for="nr-label">Role name</label><input id="nr-label" maxlength="40" required placeholder="Team Aqua Admin"></div>
     <div class="row">
@@ -1071,18 +1134,8 @@ async function viewAdmin() {
       <div class="field"><label for="nr-size">First battle size</label><input id="nr-size" class="size-input" type="number" min="1" max="6" value="4"></div>
     </div>
     <button class="btn btn-gold" type="submit">Create role</button>
-  </form>
-  <form id="newupdate" class="card stack"><h2 class="card-title">Post a progress update</h2>
-    <div class="field"><label for="utitle">Title</label><input id="utitle" required maxlength="120"></div>
-    <div class="field"><label for="umile">Milestone tag (optional)</label><input id="umile" maxlength="40" placeholder="Gym 1 done"></div>
-    <div class="field"><label for="ubody">Details</label><textarea id="ubody" rows="3"></textarea></div>
-    <button class="btn btn-gold" type="submit">Post update</button>
-  </form>
-  <div class="card stack"><h2 class="card-title">Export for the game</h2>
-    <p class="muted">Character submissions now open from each slot on the Roles page. Downloads everything as one JSON file for Spark and Codex to turn into trainer data.</p>
-    <button class="btn btn-ghost" id="export">Download export</button>
-  </div>
-  <form id="newinvite" class="card stack"><h2 class="card-title">Invited emails</h2>
+    </form>`)}`)}
+  ${group("invites", "Invited emails", pill((invites || []).length, "invited") + pill(joined, "joined"), `<form id="newinvite" class="stack">
     <p class="muted">Only these emails can create an account. Add a friend’s email, then send them the portal link.</p>
     <div class="row">
       <div class="field"><label for="iemail">Email</label><input id="iemail" type="email" required></div>
@@ -1097,7 +1150,19 @@ async function viewAdmin() {
         <td class="admin-actions">${i.used_at ? "" : `<button class="btn btn-danger btn-small" type="button" data-uninvite="${esc(i.email)}">Remove</button>`}</td>
       </tr>`).join("") || `<tr><td colspan="4" class="muted">Nobody invited yet.</td></tr>`}</tbody>
     </table></div>
-  </form>`;
+  </form>`)}
+  ${group("updates", "Post a progress update", "", `<form id="newupdate" class="stack">
+    <div class="field"><label for="utitle">Title</label><input id="utitle" required maxlength="120"></div>
+    <div class="field"><label for="umile">Milestone tag (optional)</label><input id="umile" maxlength="40" placeholder="Gym 1 done"></div>
+    <div class="field"><label for="ubody">Details</label><textarea id="ubody" rows="3"></textarea></div>
+    <button class="btn btn-gold" type="submit">Post update</button>
+  </form>`)}
+  ${group("export", "Export for the game", "", `
+    <p class="muted">Character submissions now open from each slot on the Roles page. Downloads everything as one JSON file for Spark and Codex to turn into trainer data.</p>
+    <button class="btn btn-ghost" id="export">Download export</button>
+  `)}`;
+  foldsRemember("admin");
+  wireFoldAll();
 
   document.getElementById("newinvite").onsubmit = async e => {
     e.preventDefault();
