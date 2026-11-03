@@ -23,7 +23,7 @@
 <body>
 <a class="skip-link" href="#app" id="skip">Skip to content</a>
 <header class="app-header" id="header" hidden>
-  <a class="brand" href="#/home" translate="no"><img class="brand-mon" src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-iii/emerald/252.png" width="48" height="48" alt="">Emerald Lost Generation</a>
+  <a class="brand" href="#/home" translate="no"><img class="brand-mon" src="img/px/emerald.svg" width="36" height="36" alt="">Emerald Lost Generation</a>
   <nav class="nav" id="nav">
     <a href="#/home" data-route="home">Home</a>
     <a href="#/roles" data-route="roles">Roles</a>
@@ -32,12 +32,23 @@
     <a href="#/profile" data-route="profile">Crew</a>
     <a href="#/admin" data-route="admin" id="nav-admin" hidden>Admin</a>
   </nav>
-  <span class="header-pals" aria-hidden="true"><img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-iii/emerald/255.png" width="48" height="48" alt=""><img src="https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/versions/generation-iii/emerald/258.png" width="48" height="48" alt=""></span>
   <div class="row">
     <button class="theme-toggle btn btn-ghost btn-small" id="theme-toggle" type="button">Light mode</button>
     <button class="btn btn-ghost btn-small" id="logout" type="button">Log out</button>
   </div>
 </header>
+<!-- Pixel scene under the menu (all art drawn for the portal: Spark did the land, Codex the Pokémon) -->
+<div class="header-scene" aria-hidden="true">
+  <i class="hs-layer hs-stars"></i>
+  <img class="hs-moon" src="img/px/moon.svg" alt="">
+  <img class="hs-rayquaza" src="img/px/rayquaza.svg" alt="">
+  <i class="hs-layer hs-hills"></i>
+  <img class="hs-chimney" src="img/px/chimney.svg" alt="">
+  <i class="hs-layer hs-trees"></i>
+  <span class="hs-party"><img src="img/px/treecko.svg" alt=""><img src="img/px/torchic.svg" alt=""><img src="img/px/mudkip.svg" alt=""></span>
+  <img class="hs-ball" src="img/px/pokeball.svg" alt="">
+  <i class="hs-layer hs-grass"></i>
+</div>
 <button class="theme-toggle btn btn-ghost btn-small" id="theme-toggle-auth" type="button" hidden>Light mode</button>
 <main class="container" id="app" tabindex="-1"><p class="loading">Loading…</p></main>
 <div id="toasts" aria-live="polite"></div>

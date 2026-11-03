@@ -102,17 +102,35 @@ details.team-section:not([open]):hover, details.admin-sub:not([open]):hover { bo
 /* Trainer card art is still a crop, but keep heads in frame */
 .trainer-card-art img { object-position: 50% 15%; }
 
-/* ---------- header pixel art: Treecko by the name, starters in the tall grass ---------- */
-.app-header { position: sticky; padding-bottom: calc(.75rem + 14px); }
-.app-header::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 14px; pointer-events: none;
-  background: url("../img/grass.svg") repeat-x left bottom / 48px 14px; image-rendering: pixelated; }
+/* ---------- header pixel scene: 1 art pixel = --px screen pixels ---------- */
 .brand::before { content: none; }
-.brand-mon { width: 48px; height: 48px; margin: -12px -6px -10px -10px; image-rendering: pixelated; flex: 0 0 auto; }
-.header-pals { display: none; align-self: flex-end; margin-bottom: calc(-.75rem - 14px + 3px); pointer-events: none; }
-.header-pals img { width: 48px; height: 48px; margin-left: -10px; image-rendering: pixelated; }
-@media (min-width: 760px) { .app-header { padding-bottom: calc(1rem + 14px); } .header-pals { margin-bottom: calc(-1rem - 14px + 3px); } }
-@media (min-width: 1000px) { .header-pals { display: flex; } }
-@media (max-width: 520px) { .app-header { position: relative; } }
+.brand-mon { width: 36px; height: 36px; flex: 0 0 auto; image-rendering: pixelated; }
+.app-header { border-bottom: 0; }
+.app-header[hidden] + .header-scene { display: none; }
+.header-scene { --px: 3px; position: relative; height: calc(36 * var(--px)); overflow: hidden; border-bottom: 1px solid var(--border);
+  /* night sky in hard pixel bands, darkest at the top */
+  background: linear-gradient(to bottom, #0b1d15 0 22%, #0e2419 22% 42%, #112b1f 42% 60%, #153425 60% 76%, #1a3d2c 76% 100%); }
+.header-scene > * { position: absolute; display: block; image-rendering: pixelated; pointer-events: none; }
+.hs-layer { left: 0; right: 0; background-repeat: repeat-x; }
+.hs-stars { top: 0; height: calc(20 * var(--px)); background-image: url("../img/px/stars.svg"); background-size: calc(96 * var(--px)) 100%; }
+.hs-hills { bottom: calc(10 * var(--px)); height: calc(12 * var(--px)); background-image: url("../img/px/hills.svg"); background-size: calc(160 * var(--px)) 100%; }
+.hs-trees { bottom: calc(6 * var(--px)); height: calc(16 * var(--px)); background-image: url("../img/px/trees.svg"); background-size: calc(64 * var(--px)) 100%; background-position: calc(17 * var(--px)) 0; }
+.hs-grass { bottom: 0; height: calc(10 * var(--px)); background-image: url("../img/px/grass.svg"); background-size: calc(32 * var(--px)) 100%; }
+.hs-moon { top: calc(3 * var(--px)); right: 14%; width: calc(10 * var(--px)); }
+.hs-rayquaza { top: calc(4 * var(--px)); left: 58%; width: calc(48 * var(--px)); }
+.hs-chimney { bottom: calc(9 * var(--px)); left: 36%; width: calc(44 * var(--px)); }
+.hs-party { display: flex; gap: calc(3 * var(--px)); left: max(1rem, calc((100vw - 1180px) / 2)); bottom: calc(1 * var(--px)); }
+.hs-party img { width: calc(24 * var(--px)); image-rendering: pixelated; }
+.hs-ball { bottom: calc(3 * var(--px)); right: 30%; width: calc(12 * var(--px)); }
+:root[data-theme="light"] .header-scene { background: linear-gradient(to bottom, #e9f7ee 0 22%, #def2e5 22% 42%, #d2ecdb 42% 60%, #c5e5d0 60% 76%, #b8dec5 76% 100%); }
+:root[data-theme="light"] .hs-stars { display: none; }
+:root[data-theme="light"] .hs-hills { background-image: url("../img/px/hills-light.svg"); }
+:root[data-theme="light"] .hs-trees { background-image: url("../img/px/trees-light.svg"); }
+:root[data-theme="light"] .hs-grass { background-image: url("../img/px/grass-light.svg"); }
+:root[data-theme="light"] .hs-chimney { content: url("../img/px/chimney-light.svg"); }
+:root[data-theme="light"] .hs-moon { display: none; }
+@media (max-width: 760px) { .header-scene { --px: 2px; } .hs-chimney { left: 52%; } .hs-rayquaza { left: 64%; top: calc(2 * var(--px)); } .hs-moon { right: 4%; } .hs-ball { right: 8%; } }
+@media (max-width: 420px) { .hs-rayquaza { display: none; } }
 
 /* Pokémon slots fold to one line (phones start folded) */
 details.poke-slot { display: block; }
